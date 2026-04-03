@@ -1,0 +1,94 @@
+{
+  "entities": {
+    "Project": {
+      "title": "Project",
+      "description": "A project managed by the application.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["RD", "DELIVERY"] },
+        "status": { "type": "string", "enum": ["PLANNED", "ACTIVE", "COMPLETED", "ON_HOLD"] },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "lifecycle": { "type": "string", "enum": ["IDEA", "POC", "MVP", "DELIVERY"] },
+        "client": { "type": "string" },
+        "startDate": { "type": "string" },
+        "targetGoLive": { "type": "string" },
+        "ownerId": { "type": "string" }
+      },
+      "required": ["id", "name", "type", "status", "createdAt", "updatedAt", "ownerId"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A task within a project.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["BACKLOG", "TODO", "IN_PROGRESS", "DONE", "BLOCKED"] },
+        "workstream": { "type": "string" },
+        "owner": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "duration": { "type": "number" },
+        "dependencies": { "type": "array", "items": { "type": "string" } },
+        "phase": { "type": "string" }
+      },
+      "required": ["id", "projectId", "title", "status", "workstream", "owner"]
+    },
+    "RAIDItem": {
+      "title": "RAIDItem",
+      "description": "A Risk, Assumption, Dependency, or Issue.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "type": { "type": "string", "enum": ["RISK", "ASSUMPTION", "DEPENDENCY", "ISSUE"] },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "impact": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH"] },
+        "probability": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH"] },
+        "owner": { "type": "string" },
+        "status": { "type": "string", "enum": ["OPEN", "CLOSED", "MITIGATED"] },
+        "mitigation": { "type": "string" }
+      },
+      "required": ["id", "projectId", "type", "category", "description", "impact", "owner", "status", "mitigation"]
+    },
+    "Milestone": {
+      "title": "Milestone",
+      "description": "A project milestone.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "name": { "type": "string" },
+        "phase": { "type": "string" },
+        "targetDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["PLANNED", "ACHIEVED", "DELAYED"] }
+      },
+      "required": ["id", "projectId", "name", "phase", "targetDate", "status"]
+    }
+  },
+  "firestore": {
+    "/projects/{projectId}": {
+      "schema": "Project",
+      "description": "Collection of projects."
+    },
+    "/projects/{projectId}/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Tasks associated with a project."
+    },
+    "/projects/{projectId}/raidItems/{raidItemId}": {
+      "schema": "RAIDItem",
+      "description": "RAID items associated with a project."
+    },
+    "/projects/{projectId}/milestones/{milestoneId}": {
+      "schema": "Milestone",
+      "description": "Milestones associated with a project."
+    }
+  }
+}

@@ -1,0 +1,154 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: projects
+    // Document ID: projectId
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required, size < 100)
+    //   - description: string (optional, size < 1000)
+    //   - type: string (required, enum: ["RD", "DELIVERY"])
+    //   - status: string (required, enum: ["PLANNED", "ACTIVE", "COMPLETED", "ON_HOLD"])
+    //   - createdAt: number (required)
+    //   - updatedAt: number (required)
+    //   - lifecycle: string (optional, enum: ["IDEA", "POC", "MVP", "DELIVERY"])
+    //   - client: string (optional, size < 100)
+    //   - startDate: string (optional, ISO 8601)
+    //   - targetGoLive: string (optional, ISO 8601)
+    //   - ownerId: string (required, matches auth.uid)
+    //
+    // Sub-collection: tasks
+    // Fields:
+    //   - id: string (required)
+    //   - projectId: string (required)
+    //   - title: string (required, size < 200)
+    //   - description: string (optional, size < 1000)
+    //   - status: string (required, enum: ["BACKLOG", "TODO", "IN_PROGRESS", "DONE", "BLOCKED"])
+    //   - workstream: string (required, size < 100)
+    //   - owner: string (required, size < 100)
+    //   - startDate: string (optional)
+    //   - endDate: string (optional)
+    //   - duration: number (optional)
+    //   - dependencies: list (optional, size < 50)
+    //   - phase: string (optional, size < 100)
+    //
+    // Sub-collection: raidItems
+    // Fields:
+    //   - id: string (required)
+    //   - projectId: string (required)
+    //   - type: string (required, enum: ["RISK", "ASSUMPTION", "DEPENDENCY", "ISSUE"])
+    //   - category: string (required, size < 100)
+    //   - description: string (required, size < 1000)
+    //   - impact: string (required, enum: ["LOW", "MEDIUM", "HIGH"])
+    //   - probability: string (optional, enum: ["LOW", "MEDIUM", "HIGH"])
+    //   - owner: string (required, size < 100)
+    //   - status: string (required, enum: ["OPEN", "CLOSED", "MITIGATED"])
+    //   - mitigation: string (required, size < 1000)
+    //
+    // Sub-collection: milestones
+    // Fields:
+    //   - id: string (required)
+    //   - projectId: string (required)
+    //   - name: string (required, size < 200)
+    //   - phase: string (required, size < 100)
+    //   - targetDate: string (required)
+    //   - status: string (required, enum: ["PLANNED", "ACHIEVED", "DELAYED"])
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isProjectOwner(projectId) {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid ||
+         getAfter(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid);
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['id', 'name', 'type', 'status', 'createdAt', 'updatedAt', 'ownerId']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.type in ["RD", "DELIVERY"] &&
+             data.status in ["PLANNED", "ACTIVE", "COMPLETED", "ON_HOLD"] &&
+             data.createdAt is number &&
+             data.updatedAt is number &&
+             data.ownerId == request.auth.uid;
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['id', 'projectId', 'title', 'status', 'workstream', 'owner']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.status in ["BACKLOG", "TODO", "IN_PROGRESS", "DONE", "BLOCKED"] &&
+             data.workstream is string && data.workstream.size() < 100 &&
+             data.owner is string && data.owner.size() < 100;
+    }
+
+    function isValidRAIDItem(data) {
+      return data.keys().hasAll(['id', 'projectId', 'type', 'category', 'description', 'impact', 'owner', 'status', 'mitigation']) &&
+             data.type in ["RISK", "ASSUMPTION", "DEPENDENCY", "ISSUE"] &&
+             data.category is string && data.category.size() < 100 &&
+             data.description is string && data.description.size() < 1000 &&
+             data.impact in ["LOW", "MEDIUM", "HIGH"] &&
+             data.owner is string && data.owner.size() < 100 &&
+             data.status in ["OPEN", "CLOSED", "MITIGATED"] &&
+             data.mitigation is string && data.mitigation.size() < 1000;
+    }
+
+    function isValidMilestone(data) {
+      return data.keys().hasAll(['id', 'projectId', 'name', 'phase', 'targetDate', 'status']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.phase is string && data.phase.size() < 100 &&
+             data.status in ["PLANNED", "ACHIEVED", "DELAYED"];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /projects/{projectId} {
+      allow read: if isOwner(resource.data.ownerId);
+      allow create: if isAuthenticated() && isValidProject(request.resource.data);
+      allow update: if isOwner(resource.data.ownerId) && isValidProject(request.resource.data) &&
+                      request.resource.data.ownerId == resource.data.ownerId;
+      allow delete: if isOwner(resource.data.ownerId);
+
+      match /tasks/{taskId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId) && isValidTask(request.resource.data);
+        allow update: if isProjectOwner(projectId) && isValidTask(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+
+      match /raidItems/{raidItemId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId) && isValidRAIDItem(request.resource.data);
+        allow update: if isProjectOwner(projectId) && isValidRAIDItem(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+
+      match /milestones/{milestoneId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId) && isValidMilestone(request.resource.data);
+        allow update: if isProjectOwner(projectId) && isValidMilestone(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
