@@ -30,6 +30,8 @@ export interface Task {
   duration?: number;
   dependencies?: string[]; // IDs of other tasks
   phase?: string; // For Waterfall
+  objective?: string;
+  acceptanceCriteria?: string;
 }
 
 export interface RAIDItem {

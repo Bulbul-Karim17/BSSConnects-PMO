@@ -6,8 +6,9 @@ import { motion } from 'motion/react';
 
 interface AgileBoardProps {
   tasks: Task[];
-  onTaskUpdate: (taskId: string, status: Task['status']) => void;
+  onTaskUpdate: (taskId: string, updates: Partial<Task>) => void;
   onAddTask: (status: Task['status']) => void;
+  onTaskClick: (taskId: string) => void;
 }
 
 const COLUMNS: { id: Task['status']; label: string; color: string }[] = [
@@ -18,7 +19,7 @@ const COLUMNS: { id: Task['status']; label: string; color: string }[] = [
   { id: 'BLOCKED', label: 'Blocked', color: 'bg-red-50 text-red-600' },
 ];
 
-export const AgileBoard: React.FC<AgileBoardProps> = ({ tasks, onTaskUpdate, onAddTask }) => {
+export const AgileBoard: React.FC<AgileBoardProps> = ({ tasks, onTaskUpdate, onAddTask, onTaskClick }) => {
   return (
     <div className="flex gap-6 overflow-x-auto pb-6 min-h-[600px]">
       {COLUMNS.map((column) => (
@@ -45,36 +46,62 @@ export const AgileBoard: React.FC<AgileBoardProps> = ({ tasks, onTaskUpdate, onA
                 <motion.div
                   key={task.id}
                   layoutId={task.id}
-                  className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow cursor-grab active:cursor-grabbing group"
+                  onClick={() => onTaskClick(task.id)}
+                  className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow cursor-pointer group"
                 >
                   <div className="flex items-start justify-between mb-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      {task.workstream}
-                    </span>
+                    <input
+                      type="text"
+                      value={task.workstream}
+                      onChange={(e) => onTaskUpdate(task.id, { workstream: e.target.value })}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors w-20"
+                      placeholder="Workstream"
+                    />
                     <button className="opacity-0 group-hover:opacity-100 p-1 hover:bg-slate-100 rounded text-slate-400 transition-opacity">
                       <MoreVertical className="w-3.5 h-3.5" />
                     </button>
                   </div>
                   
-                  <h4 className="text-sm font-semibold text-slate-900 mb-2 line-clamp-2">
-                    {task.title}
-                  </h4>
+                  <input
+                    type="text"
+                    value={task.title}
+                    onChange={(e) => onTaskUpdate(task.id, { title: e.target.value })}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full text-sm font-semibold text-slate-900 mb-2 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors"
+                    placeholder="Task title"
+                  />
                   
-                  <p className="text-xs text-slate-500 mb-4 line-clamp-2">
-                    {task.description}
-                  </p>
+                  <textarea
+                    value={task.description}
+                    onChange={(e) => onTaskUpdate(task.id, { description: e.target.value })}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full text-xs text-slate-500 mb-4 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors resize-none"
+                    placeholder="Add description..."
+                    rows={2}
+                  />
 
                   <div className="flex items-center justify-between pt-3 border-t border-slate-50">
-                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-slate-500">
-                      <User className="w-3 h-3" />
-                      <span>{task.owner}</span>
+                    <div className="flex items-center gap-1.5">
+                      <User className="w-3 h-3 text-slate-400" />
+                      <input
+                        type="text"
+                        value={task.owner}
+                        onChange={(e) => onTaskUpdate(task.id, { owner: e.target.value })}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-[10px] font-medium text-slate-500 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors w-24"
+                        placeholder="Owner"
+                      />
                     </div>
                     <div className="flex items-center gap-1">
                       {COLUMNS.map((col) => (
                         col.id !== task.status && (
                           <button
                             key={col.id}
-                            onClick={() => onTaskUpdate(task.id, col.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTaskUpdate(task.id, { status: col.id });
+                            }}
                             className={cn(
                               "w-5 h-5 rounded flex items-center justify-center text-[8px] font-bold transition-all",
                               col.id === 'DONE' ? "bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white" :

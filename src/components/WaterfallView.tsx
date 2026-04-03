@@ -5,9 +5,10 @@ import { cn } from '../lib/utils';
 
 interface WaterfallViewProps {
   tasks: Task[];
+  onTaskClick: (taskId: string) => void;
 }
 
-export const WaterfallView: React.FC<WaterfallViewProps> = ({ tasks }) => {
+export const WaterfallView: React.FC<WaterfallViewProps> = ({ tasks, onTaskClick }) => {
   // Group tasks by phase
   const phases = Array.from(new Set(tasks.map(t => t.phase || 'Uncategorized')));
 
@@ -31,7 +32,8 @@ export const WaterfallView: React.FC<WaterfallViewProps> = ({ tasks }) => {
               .map((task) => (
                 <div
                   key={task.id}
-                  className="bg-white border border-slate-200 rounded-xl p-4 flex items-center gap-6 hover:border-blue-300 transition-all group"
+                  onClick={() => onTaskClick(task.id)}
+                  className="bg-white border border-slate-200 rounded-xl p-4 flex items-center gap-6 hover:border-blue-300 transition-all group cursor-pointer"
                 >
                   <div className={cn(
                     "w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0",

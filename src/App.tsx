@@ -6,6 +6,7 @@ import { AgileBoard } from './components/AgileBoard';
 import { WaterfallView } from './components/WaterfallView';
 import { RAIDLog } from './components/RAIDLog';
 import { Roadmap } from './components/Roadmap';
+import { TaskModal } from './components/TaskModal';
 import { 
   LayoutDashboard, 
   Plus, 
@@ -27,7 +28,8 @@ import {
   CheckCircle2,
   Clock,
   AlertCircle,
-  Loader2
+  Loader2,
+  Upload
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -49,6 +51,9 @@ export default function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP'>('OVERVIEW');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
@@ -288,11 +293,11 @@ export default function App() {
     }
   };
 
-  const handleTaskUpdate = async (taskId: string, newStatus: Task['status']) => {
+  const handleTaskUpdate = async (taskId: string, updates: Partial<Task>) => {
     if (!selectedProjectId || !user) return;
     try {
       await updateDoc(doc(db, 'projects', selectedProjectId, 'tasks', taskId), {
-        status: newStatus,
+        ...updates,
         updatedAt: Date.now()
       });
     } catch (error) {
@@ -340,6 +345,65 @@ export default function App() {
       await setDoc(doc(db, 'projects', selectedProjectId, 'raidItems', raidId), newItem);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `projects/${selectedProjectId}/raidItems/${raidId}`);
+    }
+  };
+
+  const handleImportFileAnalyzed = async (data: any) => {
+    if (!selectedProjectId || !user) return;
+    setIsImporting(true);
+    try {
+      const batch = writeBatch(db);
+
+      // Import Tasks
+      if (data.tasks && Array.isArray(data.tasks)) {
+        data.tasks.forEach((taskData: any) => {
+          const taskId = Math.random().toString(36).substr(2, 9);
+          const taskRef = doc(db, 'projects', selectedProjectId, 'tasks', taskId);
+          batch.set(taskRef, {
+            ...taskData,
+            id: taskId,
+            projectId: selectedProjectId,
+            status: taskData.status || 'BACKLOG',
+            owner: taskData.owner || user.displayName || 'Unassigned',
+          });
+        });
+      }
+
+      // Import RAID items
+      if (data.raid && Array.isArray(data.raid)) {
+        data.raid.forEach((raidData: any) => {
+          const raidId = Math.random().toString(36).substr(2, 9);
+          const raidRef = doc(db, 'projects', selectedProjectId, 'raidItems', raidId);
+          batch.set(raidRef, {
+            ...raidData,
+            id: raidId,
+            projectId: selectedProjectId,
+            status: raidData.status || 'OPEN',
+            owner: raidData.owner || user.displayName || 'Unassigned',
+          });
+        });
+      }
+
+      // Import Milestones
+      if (data.milestones && Array.isArray(data.milestones)) {
+        data.milestones.forEach((milestoneData: any) => {
+          const milestoneId = Math.random().toString(36).substr(2, 9);
+          const milestoneRef = doc(db, 'projects', selectedProjectId, 'milestones', milestoneId);
+          batch.set(milestoneRef, {
+            ...milestoneData,
+            id: milestoneId,
+            projectId: selectedProjectId,
+            status: milestoneData.status || 'PLANNED',
+          });
+        });
+      }
+
+      await batch.commit();
+      setShowImportModal(false);
+    } catch (error) {
+      console.error("Error importing data:", error);
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -759,34 +823,67 @@ export default function App() {
                         <h3 className="font-bold text-slate-900">Product Backlog</h3>
                         <p className="text-xs text-slate-500">Prioritize and manage your product backlog items.</p>
                       </div>
-                      <button 
-                        onClick={() => selectedProjectId && handleAddTask(selectedProjectId, 'BACKLOG')}
-                        className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 transition-all"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        Add Item
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => setShowImportModal(true)}
+                          className="flex items-center gap-2 bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-50 transition-all"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          Import
+                        </button>
+                        <button 
+                          onClick={() => selectedProjectId && handleAddTask(selectedProjectId, 'BACKLOG')}
+                          className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 transition-all"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Add Item
+                        </button>
+                      </div>
                     </div>
                     <div className="divide-y divide-slate-100">
                       {tasks.filter(t => t.status === 'BACKLOG').length > 0 ? (
                         tasks.filter(t => t.status === 'BACKLOG').map(task => (
-                          <div key={task.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between group">
+                          <div key={task.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between group cursor-pointer" onClick={() => setSelectedTaskId(task.id)}>
                             <div className="flex items-center gap-4 flex-grow">
                               <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center text-slate-400">
                                 <Layers className="w-4 h-4" />
                               </div>
-                              <div>
-                                <h4 className="text-sm font-semibold text-slate-900">{task.title}</h4>
-                                <p className="text-xs text-slate-500 line-clamp-1">{task.description}</p>
+                              <div className="flex-grow space-y-1">
+                                <input
+                                  type="text"
+                                  value={task.title}
+                                  onChange={(e) => handleTaskUpdate(task.id, { title: e.target.value })}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-full text-sm font-semibold text-slate-900 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors"
+                                  placeholder="Task title"
+                                />
+                                <textarea
+                                  value={task.description}
+                                  onChange={(e) => handleTaskUpdate(task.id, { description: e.target.value })}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-full text-xs text-slate-500 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors resize-none"
+                                  placeholder="Add description..."
+                                  rows={1}
+                                />
                               </div>
                             </div>
                             <div className="flex items-center gap-3">
-                              <div className="flex items-center gap-1.5 text-[10px] font-medium text-slate-400">
-                                <User className="w-3 h-3" />
-                                <span>{task.owner}</span>
+                              <div className="flex items-center gap-1.5">
+                                <User className="w-3 h-3 text-slate-400" />
+                                <input
+                                  type="text"
+                                  value={task.owner}
+                                  onChange={(e) => handleTaskUpdate(task.id, { owner: e.target.value })}
+                                  className="text-[10px] font-medium text-slate-400 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors w-24"
+                                  placeholder="Owner"
+                                  onClick={(e) => e.stopPropagation()}
+                                />
                               </div>
                               <button 
-                                onClick={() => handleTaskUpdate(task.id, 'TODO')}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTaskUpdate(task.id, { status: 'TODO' });
+                                }}
                                 className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-[10px] font-bold hover:bg-blue-600 hover:text-white transition-all opacity-0 group-hover:opacity-100"
                               >
                                 Move to Sprint
@@ -812,9 +909,10 @@ export default function App() {
                       tasks={tasks} 
                       onTaskUpdate={handleTaskUpdate} 
                       onAddTask={(status) => selectedProjectId && handleAddTask(selectedProjectId, status)} 
+                      onTaskClick={(taskId) => setSelectedTaskId(taskId)}
                     />
                   ) : (
-                    <WaterfallView tasks={tasks} />
+                    <WaterfallView tasks={tasks} onTaskClick={(taskId) => setSelectedTaskId(taskId)} />
                   )
                 )}
 
@@ -828,14 +926,43 @@ export default function App() {
                 )}
 
                 {activeTab === 'ROADMAP' && (
-                  <Roadmap tasks={tasks} milestones={milestones} />
+                  <Roadmap 
+                    tasks={tasks} 
+                    milestones={milestones} 
+                    onTaskClick={(taskId) => setSelectedTaskId(taskId)}
+                  />
                 )}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* New Project Modal */}
+        {/* Import Modal */}
+        {showImportModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden"
+            >
+              <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-slate-900">Import Project Data</h2>
+                <button onClick={() => setShowImportModal(false)} className="p-2 hover:bg-slate-50 rounded-lg text-slate-400">
+                  <Plus className="w-5 h-5 rotate-45" />
+                </button>
+              </div>
+              <div className="p-8">
+                <FileUpload onFileAnalyzed={handleImportFileAnalyzed} />
+                <div className="mt-6 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                  <h4 className="text-sm font-bold text-blue-900 mb-1">How it works</h4>
+                  <p className="text-xs text-blue-700 leading-relaxed">
+                    Upload your project plan (Word, Excel, or PDF). Our AI will analyze the document and automatically extract tasks for your backlog, RAID items, and milestones.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
         {showNewProjectModal && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <motion.div 
@@ -891,6 +1018,15 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {selectedTaskId && tasks.find(t => t.id === selectedTaskId) && (
+        <TaskModal
+          task={tasks.find(t => t.id === selectedTaskId)!}
+          isOpen={!!selectedTaskId}
+          onClose={() => setSelectedTaskId(null)}
+          onUpdate={handleTaskUpdate}
+        />
+      )}
     </div>
   );
 }
