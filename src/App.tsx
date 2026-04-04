@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Project, Task, RAIDItem, Milestone } from './types';
+import { Project, Task, RAIDItem, Milestone, RDPhase } from './types';
 import { ProjectCard } from './components/ProjectCard';
 import { FileUpload } from './components/FileUpload';
 import { AgileBoard } from './components/AgileBoard';
@@ -51,6 +51,9 @@ export default function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP'>('OVERVIEW');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [selectedTypeForCreation, setSelectedTypeForCreation] = useState<'RD' | 'DELIVERY' | null>(null);
+  const [selectingRDPhase, setSelectingRDPhase] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -140,31 +143,39 @@ export default function App() {
     }
   };
 
-  const handleFileAnalyzed = async (data: any) => {
+  const handleFileAnalyzed = async (data: any, existingProjectId?: string) => {
     if (!user) return;
     setIsSaving(true);
 
-    const projectId = Math.random().toString(36).substr(2, 9);
-    const newProject: Project = {
-      name: data.project?.name || 'New Project',
-      description: data.project?.description || '',
-      type: data.project?.type || 'RD',
-      lifecycle: data.project?.type === 'RD' ? (data.project?.lifecycle || 'IDEA') : undefined,
-      client: data.project?.client || '',
-      startDate: data.project?.startDate || new Date().toISOString().split('T')[0],
-      targetGoLive: data.project?.targetGoLive || '',
-      id: projectId,
-      ownerId: user.uid,
-      status: 'ACTIVE',
-      createdAt: Date.now(),
+    const projectId = existingProjectId || Math.random().toString(36).substr(2, 9);
+    const projectType = existingProjectId ? (projects.find(p => p.id === existingProjectId)?.type || 'RD') : (selectedTypeForCreation || data.project?.type || 'RD');
+    
+    const projectDoc: Partial<Project> = {
       updatedAt: Date.now(),
+      ...(existingProjectId ? {} : {
+        name: newProjectName || data.project?.name || 'New Project',
+        description: data.project?.description || '',
+        type: projectType,
+        client: data.project?.client || '',
+        startDate: data.project?.startDate || new Date().toISOString().split('T')[0],
+        targetGoLive: data.project?.targetGoLive || '',
+        id: projectId,
+        ownerId: user.uid,
+        status: 'ACTIVE',
+        createdAt: Date.now(),
+        ...(projectType === 'RD' ? { lifecycle: data.project?.lifecycle || 'IDEA' } : {})
+      })
     };
 
     try {
       const batch = writeBatch(db);
       
       // Project doc
-      batch.set(doc(db, 'projects', projectId), newProject);
+      if (existingProjectId) {
+        batch.update(doc(db, 'projects', projectId), projectDoc);
+      } else {
+        batch.set(doc(db, 'projects', projectId), projectDoc as Project);
+      }
 
       // Tasks
       if (Array.isArray(data.tasks)) {
@@ -221,6 +232,9 @@ export default function App() {
       await batch.commit();
       setSelectedProjectId(projectId);
       setShowNewProjectModal(false);
+      setSelectingRDPhase(false);
+      setSelectedTypeForCreation(null);
+      setNewProjectName('');
     } catch (error) {
       console.error("Error saving project:", error);
       handleFirestoreError(error, OperationType.WRITE, 'projects');
@@ -229,28 +243,31 @@ export default function App() {
     }
   };
 
-  const handleCreateManualProject = async (type: 'RD' | 'DELIVERY') => {
+  const handleCreateManualProject = async (type: 'RD' | 'DELIVERY', lifecycle: RDPhase = 'IDEA') => {
     if (!user) return;
     setIsSaving(true);
 
     const projectId = Math.random().toString(36).substr(2, 9);
     const newProject: Project = {
-      name: `New ${type === 'RD' ? 'R&D' : 'Delivery'} Project`,
+      name: newProjectName || `New ${type === 'RD' ? 'R&D' : 'Delivery'} Project`,
       description: 'Manually created project. Add details here.',
       type,
-      lifecycle: type === 'RD' ? 'IDEA' : undefined,
       id: projectId,
       ownerId: user.uid,
       status: 'ACTIVE',
       createdAt: Date.now(),
       updatedAt: Date.now(),
       startDate: new Date().toISOString().split('T')[0],
+      ...(type === 'RD' ? { lifecycle } : {})
     };
 
     try {
       await setDoc(doc(db, 'projects', projectId), newProject);
       setSelectedProjectId(projectId);
       setShowNewProjectModal(false);
+      setSelectingRDPhase(false);
+      setSelectedTypeForCreation(null);
+      setNewProjectName('');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'projects');
     } finally {
@@ -261,14 +278,62 @@ export default function App() {
   const handlePromoteToDelivery = async () => {
     if (!selectedProject || selectedProject.type !== 'RD' || !user) return;
     
+    setIsSaving(true);
     try {
-      await updateDoc(doc(db, 'projects', selectedProject.id), {
+      const newProjectId = Math.random().toString(36).substr(2, 9);
+      const newProject: Project = {
+        ...selectedProject,
+        id: newProjectId,
         type: 'DELIVERY',
-        updatedAt: Date.now()
+        name: `${selectedProject.name} (Delivery)`,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      // Remove lifecycle for Delivery project
+      if ('lifecycle' in newProject) {
+        delete newProject.lifecycle;
+      }
+
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'projects', newProjectId), newProject);
+
+      // Copy Tasks
+      tasks.forEach(task => {
+        const newTaskId = Math.random().toString(36).substr(2, 9);
+        batch.set(doc(db, 'projects', newProjectId, 'tasks', newTaskId), {
+          ...task,
+          id: newTaskId,
+          projectId: newProjectId
+        });
       });
+
+      // Copy RAID Items
+      raidItems.forEach(item => {
+        const newItemId = Math.random().toString(36).substr(2, 9);
+        batch.set(doc(db, 'projects', newProjectId, 'raidItems', newItemId), {
+          ...item,
+          id: newItemId,
+          projectId: newProjectId
+        });
+      });
+
+      // Copy Milestones
+      milestones.forEach(milestone => {
+        const newMilestoneId = Math.random().toString(36).substr(2, 9);
+        batch.set(doc(db, 'projects', newProjectId, 'milestones', newMilestoneId), {
+          ...milestone,
+          id: newMilestoneId,
+          projectId: newProjectId
+        });
+      });
+
+      await batch.commit();
+      setSelectedProjectId(newProjectId);
       setActiveTab('OVERVIEW');
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `projects/${selectedProject.id}`);
+      handleFirestoreError(error, OperationType.WRITE, 'projects');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -741,6 +806,26 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/* Smart Import Section */}
+                      <div className="bg-white border border-slate-200 rounded-2xl p-8 relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full -mr-16 -mt-16 group-hover:scale-110 transition-transform duration-500 opacity-50" />
+                        <div className="relative z-10">
+                          <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+                              <Zap className="w-5 h-5 text-blue-600" />
+                            </div>
+                            <div>
+                              <h3 className="text-lg font-bold text-slate-900">Smart Import</h3>
+                              <p className="text-xs text-slate-500">Populate your project with AI analysis</p>
+                            </div>
+                          </div>
+                          <p className="text-sm text-slate-600 mb-6 max-w-xl">
+                            Upload your project plan, brief, or spreadsheet. Our AI will analyze the document and automatically extract tasks, RAID items, and milestones directly into this project.
+                          </p>
+                          <FileUpload onFileAnalyzed={(data) => handleFileAnalyzed(data, selectedProject?.id)} />
+                        </div>
+                      </div>
+
                       {selectedProject?.type === 'RD' && (
                         <div className="bg-gradient-to-br from-purple-600 to-indigo-700 rounded-2xl p-8 text-white shadow-xl shadow-purple-500/20">
                           <div className="flex items-center justify-between mb-6">
@@ -972,47 +1057,175 @@ export default function App() {
             >
               <div className="p-5 border-b border-slate-100 flex items-center justify-between">
                 <h2 className="text-lg font-bold text-slate-900">Create New Project</h2>
-                <button onClick={() => setShowNewProjectModal(false)} className="p-2 hover:bg-slate-50 rounded-lg text-slate-400">
+                <button onClick={() => {
+                  setShowNewProjectModal(false);
+                  setSelectingRDPhase(false);
+                  setSelectedTypeForCreation(null);
+                  setNewProjectName('');
+                }} className="p-2 hover:bg-slate-50 rounded-lg text-slate-400">
                   <Plus className="w-5 h-5 rotate-45" />
                 </button>
               </div>
               
               <div className="p-6">
-                <div className="mb-6">
-                  <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Smart Import</h3>
-                  <FileUpload onFileAnalyzed={handleFileAnalyzed} />
+                <div className="mb-8">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                    <span>Project Name</span>
+                    {newProjectName.trim().length > 0 && (
+                      <span className="text-emerald-500 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Valid
+                      </span>
+                    )}
+                  </label>
+                  <input 
+                    type="text"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    placeholder="e.g., Q2 Marketing Campaign, New Product Launch..."
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium"
+                    autoFocus
+                  />
+                  {!newProjectName.trim() && (
+                    <p className="mt-2 text-[10px] text-slate-400 italic">Please enter a name to continue...</p>
+                  )}
                 </div>
 
-                <div className="relative flex items-center gap-3 mb-6">
-                  <div className="flex-grow h-px bg-slate-100" />
-                  <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">OR START MANUALLY</span>
-                  <div className="flex-grow h-px bg-slate-100" />
-                </div>
+                <AnimatePresence mode="wait">
+                  {newProjectName.trim().length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                    >
+                      {!selectedTypeForCreation ? (
+                        <div className="space-y-4">
+                          <div className="relative flex items-center gap-3 py-2">
+                            <div className="flex-grow h-px bg-slate-100" />
+                            <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Step 2: Choose Methodology</span>
+                            <div className="flex-grow h-px bg-slate-100" />
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <button 
+                              onClick={() => setSelectedTypeForCreation('RD')}
+                              className="p-6 border-2 border-slate-100 rounded-2xl text-left hover:border-purple-400 hover:bg-purple-50 transition-all group"
+                            >
+                              <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-4 group-hover:bg-purple-200 transition-colors">
+                                <Zap className="w-6 h-6 text-purple-600" />
+                              </div>
+                              <h4 className="font-bold text-slate-900 mb-1">R&D Project</h4>
+                              <p className="text-xs text-slate-500">Agile methodology, Scrum boards, and rapid prototyping.</p>
+                            </button>
+                            <button 
+                              onClick={() => setSelectedTypeForCreation('DELIVERY')}
+                              className="p-6 border-2 border-slate-100 rounded-2xl text-left hover:border-blue-400 hover:bg-blue-50 transition-all group"
+                            >
+                              <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-4 group-hover:bg-blue-200 transition-colors">
+                                <Briefcase className="w-6 h-6 text-blue-600" />
+                              </div>
+                              <h4 className="font-bold text-slate-900 mb-1">Delivery Project</h4>
+                              <p className="text-xs text-slate-500">Waterfall methodology, WBS, and milestone tracking.</p>
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                          <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                            <div className="flex items-center gap-3">
+                              <div className={cn(
+                                "w-8 h-8 rounded-lg flex items-center justify-center",
+                                selectedTypeForCreation === 'RD' ? "bg-purple-100 text-purple-600" : "bg-blue-100 text-blue-600"
+                              )}>
+                                {selectedTypeForCreation === 'RD' ? <Zap className="w-4 h-4" /> : <Briefcase className="w-4 h-4" />}
+                              </div>
+                              <div>
+                                <h3 className="text-xs font-bold text-slate-900">
+                                  {selectedTypeForCreation === 'RD' ? 'R&D Project' : 'Delivery Project'}
+                                </h3>
+                                <p className="text-[10px] text-slate-500">Methodology selected</p>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => {
+                                setSelectedTypeForCreation(null);
+                                setSelectingRDPhase(false);
+                              }} 
+                              className="text-[10px] font-bold text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition-colors"
+                            >
+                              Change
+                            </button>
+                          </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <button 
-                    onClick={() => handleCreateManualProject('RD')}
-                    disabled={isSaving}
-                    className="p-4 border-2 border-slate-100 rounded-xl text-left hover:border-purple-400 hover:bg-purple-50 transition-all group disabled:opacity-50"
-                  >
-                    <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mb-3 group-hover:bg-purple-200 transition-colors">
-                      {isSaving ? <Loader2 className="w-4 h-4 text-purple-600 animate-spin" /> : <Zap className="w-4 h-4 text-purple-600" />}
-                    </div>
-                    <h4 className="font-bold text-slate-900 text-sm mb-0.5">R&D Project</h4>
-                    <p className="text-[10px] text-slate-500 leading-tight">Agile methodology with Scrum boards.</p>
-                  </button>
-                  <button 
-                    onClick={() => handleCreateManualProject('DELIVERY')}
-                    disabled={isSaving}
-                    className="p-4 border-2 border-slate-100 rounded-xl text-left hover:border-blue-400 hover:bg-blue-50 transition-all group disabled:opacity-50"
-                  >
-                    <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mb-3 group-hover:bg-blue-200 transition-colors">
-                      {isSaving ? <Loader2 className="w-4 h-4 text-blue-600 animate-spin" /> : <ArrowLeft className="w-4 h-4 text-blue-600 rotate-180" />}
-                    </div>
-                    <h4 className="font-bold text-slate-900 text-sm mb-0.5">Delivery Project</h4>
-                    <p className="text-[10px] text-slate-500 leading-tight">Waterfall methodology with WBS.</p>
-                  </button>
-                </div>
+                          <div className="space-y-4">
+                            <div className="relative flex items-center gap-3 py-2">
+                              <div className="flex-grow h-px bg-slate-100" />
+                              <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Final Step: Create Project</span>
+                              <div className="flex-grow h-px bg-slate-100" />
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4">
+                              {selectedTypeForCreation === 'RD' && !selectingRDPhase ? (
+                                <button 
+                                  onClick={() => setSelectingRDPhase(true)}
+                                  className="w-full p-6 bg-white border-2 border-slate-100 rounded-2xl text-left hover:border-purple-400 hover:bg-purple-50 transition-all group"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-4">
+                                      <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center group-hover:bg-purple-100 transition-colors">
+                                        <Layers className="w-6 h-6 text-purple-600" />
+                                      </div>
+                                      <div>
+                                        <h4 className="font-bold text-slate-900">Configure R&D Phase</h4>
+                                        <p className="text-xs text-slate-500">Choose your starting point in the lifecycle.</p>
+                                      </div>
+                                    </div>
+                                    <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-purple-400 transition-colors" />
+                                  </div>
+                                </button>
+                              ) : selectedTypeForCreation === 'RD' && selectingRDPhase ? (
+                                <div className="space-y-4 p-2">
+                                  <div className="flex items-center justify-between">
+                                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Initial Phase</h4>
+                                    <button onClick={() => setSelectingRDPhase(false)} className="text-[10px] font-bold text-blue-600 hover:underline">Back</button>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-3">
+                                    {(['IDEA', 'POC', 'MVP', 'DELIVERY'] as RDPhase[]).map((phase) => (
+                                      <button
+                                        key={phase}
+                                        onClick={() => handleCreateManualProject('RD', phase)}
+                                        className="p-4 border-2 border-slate-100 rounded-xl text-sm font-bold text-slate-700 hover:bg-purple-50 hover:border-purple-200 transition-all text-center bg-white"
+                                      >
+                                        {phase}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                <button 
+                                  onClick={() => handleCreateManualProject('DELIVERY')}
+                                  className="w-full p-6 bg-white border-2 border-slate-100 rounded-2xl text-left hover:border-blue-400 hover:bg-blue-50 transition-all group"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-4">
+                                      <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center group-hover:bg-blue-100 transition-colors">
+                                        <Plus className="w-6 h-6 text-blue-600" />
+                                      </div>
+                                      <div>
+                                        <h4 className="font-bold text-slate-900">Create Empty Project</h4>
+                                        <p className="text-xs text-slate-500">Start with a blank slate and add details later.</p>
+                                      </div>
+                                    </div>
+                                    <Plus className="w-5 h-5 text-slate-300 group-hover:text-blue-400 transition-colors" />
+                                  </div>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </motion.div>
           </div>
