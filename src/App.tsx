@@ -15,6 +15,7 @@ import {
   Settings, 
   Bell, 
   User, 
+  Users,
   ChevronRight, 
   ArrowLeft,
   Zap,
@@ -29,7 +30,11 @@ import {
   Clock,
   AlertCircle,
   Loader2,
-  Upload
+  Upload,
+  Trash2,
+  Edit2,
+  Check,
+  X
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -49,7 +54,8 @@ export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP'>('OVERVIEW');
+  const [mainView, setMainView] = useState<'DASHBOARD' | 'PROJECTS' | 'CALENDAR' | 'REPORTS' | 'RESOURCES'>('DASHBOARD');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'TIMEPLAN'>('OVERVIEW');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [selectedTypeForCreation, setSelectedTypeForCreation] = useState<'RD' | 'DELIVERY' | null>(null);
@@ -59,6 +65,10 @@ export default function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editingNameValue, setEditingNameValue] = useState('');
+  const [projectCategoryFilter, setProjectCategoryFilter] = useState<'RD' | 'DELIVERY' | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Project data state
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -108,6 +118,7 @@ export default function App() {
 
   // Selected Project Data Listener
   useEffect(() => {
+    setActiveTab('OVERVIEW');
     if (!selectedProjectId || !user) {
       setTasks([]);
       setRaidItems([]);
@@ -140,6 +151,50 @@ export default function App() {
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error("Login failed:", error);
+    }
+  };
+
+  const handleUpdateProjectName = async () => {
+    if (!selectedProjectId || !editingNameValue.trim()) return;
+    
+    setIsSaving(true);
+    try {
+      await updateDoc(doc(db, 'projects', selectedProjectId), {
+        name: editingNameValue.trim(),
+        updatedAt: Date.now()
+      });
+      setIsEditingName(false);
+    } catch (error) {
+      console.error("Error updating project name:", error);
+      handleFirestoreError(error, OperationType.UPDATE, `projects/${selectedProjectId}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteProject = async () => {
+    if (!selectedProjectId) return;
+    
+    setIsSaving(true);
+    try {
+      const batch = writeBatch(db);
+      
+      // Delete subcollections
+      tasks.forEach(t => batch.delete(doc(db, 'projects', selectedProjectId, 'tasks', t.id)));
+      raidItems.forEach(r => batch.delete(doc(db, 'projects', selectedProjectId, 'raidItems', r.id)));
+      milestones.forEach(m => batch.delete(doc(db, 'projects', selectedProjectId, 'milestones', m.id)));
+      
+      // Delete project doc
+      batch.delete(doc(db, 'projects', selectedProjectId));
+      
+      await batch.commit();
+      setSelectedProjectId(null);
+      setShowDeleteConfirm(false);
+    } catch (error) {
+      console.error("Error deleting project:", error);
+      handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -275,65 +330,28 @@ export default function App() {
     }
   };
 
-  const handlePromoteToDelivery = async () => {
-    if (!selectedProject || selectedProject.type !== 'RD' || !user) return;
+  const handleAdvanceLifecycle = async () => {
+    if (!selectedProjectId || !user) return;
+    const selectedProject = projects.find(p => p.id === selectedProjectId);
+    if (!selectedProject || selectedProject.type !== 'RD') return;
     
-    setIsSaving(true);
-    try {
-      const newProjectId = Math.random().toString(36).substr(2, 9);
-      const newProject: Project = {
-        ...selectedProject,
-        id: newProjectId,
-        type: 'DELIVERY',
-        name: `${selectedProject.name} (Delivery)`,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      // Remove lifecycle for Delivery project
-      if ('lifecycle' in newProject) {
-        delete newProject.lifecycle;
+    const phases: RDPhase[] = ['IDEA', 'POC', 'MVP', 'DELIVERY'];
+    const currentIndex = phases.indexOf(selectedProject.lifecycle || 'IDEA');
+    
+    if (currentIndex < phases.length - 1) {
+      const nextPhase = phases[currentIndex + 1];
+      setIsSaving(true);
+      try {
+        await updateDoc(doc(db, 'projects', selectedProjectId), {
+          lifecycle: nextPhase,
+          updatedAt: Date.now()
+        });
+      } catch (error) {
+        console.error("Error advancing lifecycle:", error);
+        handleFirestoreError(error, OperationType.UPDATE, `projects/${selectedProjectId}`);
+      } finally {
+        setIsSaving(false);
       }
-
-      const batch = writeBatch(db);
-      batch.set(doc(db, 'projects', newProjectId), newProject);
-
-      // Copy Tasks
-      tasks.forEach(task => {
-        const newTaskId = Math.random().toString(36).substr(2, 9);
-        batch.set(doc(db, 'projects', newProjectId, 'tasks', newTaskId), {
-          ...task,
-          id: newTaskId,
-          projectId: newProjectId
-        });
-      });
-
-      // Copy RAID Items
-      raidItems.forEach(item => {
-        const newItemId = Math.random().toString(36).substr(2, 9);
-        batch.set(doc(db, 'projects', newProjectId, 'raidItems', newItemId), {
-          ...item,
-          id: newItemId,
-          projectId: newProjectId
-        });
-      });
-
-      // Copy Milestones
-      milestones.forEach(milestone => {
-        const newMilestoneId = Math.random().toString(36).substr(2, 9);
-        batch.set(doc(db, 'projects', newProjectId, 'milestones', newMilestoneId), {
-          ...milestone,
-          id: newMilestoneId,
-          projectId: newProjectId
-        });
-      });
-
-      await batch.commit();
-      setSelectedProjectId(newProjectId);
-      setActiveTab('OVERVIEW');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'projects');
-    } finally {
-      setIsSaving(false);
     }
   };
 
@@ -512,7 +530,7 @@ export default function App() {
     { name: 'Delivery', value: projects.filter(p => p.type === 'DELIVERY').length, color: '#2563eb' },
   ];
 
-  const taskStats = [
+  const statusChartData = [
     { name: 'Done', count: tasks.filter(t => t.status === 'DONE').length, color: '#10b981' },
     { name: 'Active', count: tasks.filter(t => t.status === 'IN_PROGRESS' || t.status === 'TODO').length, color: '#3b82f6' },
     { name: 'Blocked', count: tasks.filter(t => t.status === 'BLOCKED').length, color: '#ef4444' },
@@ -529,26 +547,74 @@ export default function App() {
 
         <nav className="flex-grow py-6 px-4 space-y-1">
           <button 
-            onClick={() => setSelectedProjectId(null)}
+            onClick={() => {
+              setSelectedProjectId(null);
+              setMainView('DASHBOARD');
+              setProjectCategoryFilter(null);
+            }}
             className={cn(
               "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-              !selectedProjectId ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"
+              (!selectedProjectId && mainView === 'DASHBOARD') ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"
             )}
           >
             <LayoutDashboard className="w-4 h-4" />
             Dashboard
           </button>
-          <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-800 hover:text-white transition-colors">
+          <button 
+            onClick={() => {
+              setSelectedProjectId(null);
+              setMainView('PROJECTS');
+              setProjectCategoryFilter(null);
+            }}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              (!selectedProjectId && mainView === 'PROJECTS') ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"
+            )}
+          >
             <Briefcase className="w-4 h-4" />
             All Projects
           </button>
-          <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-800 hover:text-white transition-colors">
+          <button 
+            onClick={() => {
+              setSelectedProjectId(null);
+              setMainView('CALENDAR');
+              setProjectCategoryFilter(null);
+            }}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              (!selectedProjectId && mainView === 'CALENDAR') ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"
+            )}
+          >
             <Calendar className="w-4 h-4" />
             Calendar
           </button>
-          <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-800 hover:text-white transition-colors">
+          <button 
+            onClick={() => {
+              setSelectedProjectId(null);
+              setMainView('REPORTS');
+              setProjectCategoryFilter(null);
+            }}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              (!selectedProjectId && mainView === 'REPORTS') ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"
+            )}
+          >
             <BarChart3 className="w-4 h-4" />
             Reports
+          </button>
+          <button 
+            onClick={() => {
+              setSelectedProjectId(null);
+              setMainView('RESOURCES');
+              setProjectCategoryFilter(null);
+            }}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              (!selectedProjectId && mainView === 'RESOURCES') ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"
+            )}
+          >
+            <Users className="w-4 h-4" />
+            Resources
           </button>
         </nav>
 
@@ -582,15 +648,32 @@ export default function App() {
           <div>
             {selectedProject ? (
               <div className="flex items-center gap-2 text-slate-400 text-sm mb-1">
-                <button onClick={() => setSelectedProjectId(null)} className="hover:text-blue-600 transition-colors">Dashboard</button>
+                <button onClick={() => {
+                  setSelectedProjectId(null);
+                  setMainView('DASHBOARD');
+                }} className="hover:text-blue-600 transition-colors">Dashboard</button>
                 <ChevronRight className="w-3 h-3" />
                 <span className="text-slate-900 font-medium">{selectedProject.name}</span>
               </div>
             ) : (
-              <h1 className="text-2xl font-bold text-slate-900">Project Dashboard</h1>
+              <h1 className="text-2xl font-bold text-slate-900">
+                {mainView === 'DASHBOARD' && 'Project Dashboard'}
+                {mainView === 'PROJECTS' && 'All Projects'}
+                {mainView === 'CALENDAR' && 'Project Calendar'}
+                {mainView === 'REPORTS' && 'Project Reports'}
+                {mainView === 'RESOURCES' && 'Resource Management'}
+              </h1>
             )}
             <p className="text-sm text-slate-500">
-              {selectedProject ? `Managing ${selectedProject.type} lifecycle` : 'Overview of all your active projects and initiatives.'}
+              {selectedProject ? `Managing ${selectedProject.type} lifecycle` : (
+                <>
+                  {mainView === 'DASHBOARD' && 'Overview of all your active projects and initiatives.'}
+                  {mainView === 'PROJECTS' && 'A complete list of all your managed projects.'}
+                  {mainView === 'CALENDAR' && 'Visual timeline of tasks and milestones across all projects.'}
+                  {mainView === 'REPORTS' && 'Detailed analytics and performance metrics.'}
+                  {mainView === 'RESOURCES' && 'Team allocation and workload management.'}
+                </>
+              )}
             </p>
           </div>
 
@@ -624,14 +707,16 @@ export default function App() {
         <AnimatePresence mode="wait">
           {!selectedProjectId ? (
             <motion.div 
-              key="dashboard"
+              key={mainView}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
               className="space-y-8"
             >
-              {/* Summary Stats */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {mainView === 'DASHBOARD' && (
+                <>
+                  {/* Summary Stats */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 {[
                   { label: 'Total Projects', value: projects.length, icon: Briefcase, color: 'text-blue-600', bg: 'bg-blue-50' },
                   { label: 'Active Tasks', value: tasks.length || 24, icon: Layers, color: 'text-purple-600', bg: 'bg-purple-50' },
@@ -737,6 +822,248 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            </>
+          )}
+
+              {mainView === 'PROJECTS' && (
+                <div className="space-y-6">
+                  {!projectCategoryFilter ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-bold text-slate-900">Project Categories</h2>
+                        <button 
+                          onClick={() => setShowNewProjectModal(true)}
+                          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition-all"
+                        >
+                          <Plus className="w-4 h-4" />
+                          New Project
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        {[
+                          { 
+                            id: 'RD', 
+                            name: 'R&D Projects', 
+                            description: 'Research and development initiatives, POCs, and MVPs.',
+                            icon: Zap,
+                            color: 'bg-purple-500',
+                            count: projects.filter(p => p.type === 'RD').length
+                          },
+                          { 
+                            id: 'DELIVERY', 
+                            name: 'Delivery Projects', 
+                            description: 'Client delivery, implementation, and production projects.',
+                            icon: Briefcase,
+                            color: 'bg-blue-500',
+                            count: projects.filter(p => p.type === 'DELIVERY').length
+                          }
+                        ].map(category => (
+                          <button
+                            key={category.id}
+                            onClick={() => setProjectCategoryFilter(category.id as any)}
+                            className="group bg-white border border-slate-200 rounded-2xl p-8 text-left hover:border-blue-400 hover:shadow-xl hover:shadow-blue-500/5 transition-all"
+                          >
+                            <div className={cn("w-16 h-16 rounded-2xl flex items-center justify-center mb-6 text-white shadow-lg", category.color)}>
+                              <category.icon className="w-8 h-8" />
+                            </div>
+                            <h3 className="text-2xl font-bold text-slate-900 mb-2 group-hover:text-blue-600 transition-colors">{category.name}</h3>
+                            <p className="text-slate-500 mb-6">{category.description}</p>
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">{category.count} Projects</span>
+                              <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
+                                <ChevronRight className="w-5 h-5" />
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <button 
+                            onClick={() => setProjectCategoryFilter(null)}
+                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
+                          >
+                            <ArrowLeft className="w-5 h-5" />
+                          </button>
+                          <h2 className="text-xl font-bold text-slate-900">
+                            {projectCategoryFilter === 'RD' ? 'R&D Projects' : 'Delivery Projects'}
+                          </h2>
+                        </div>
+                        <button 
+                          onClick={() => setShowNewProjectModal(true)}
+                          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition-all"
+                        >
+                          <Plus className="w-4 h-4" />
+                          New Project
+                        </button>
+                      </div>
+
+                      {projects.filter(p => p.type === projectCategoryFilter).length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                          {projects
+                            .filter(p => p.type === projectCategoryFilter)
+                            .map(project => (
+                              <ProjectCard 
+                                key={project.id} 
+                                project={project} 
+                                onClick={() => setSelectedProjectId(project.id)} 
+                              />
+                            ))}
+                        </div>
+                      ) : (
+                        <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
+                          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Briefcase className="w-8 h-8 text-slate-300" />
+                          </div>
+                          <h3 className="text-lg font-bold text-slate-900 mb-2">No Projects in this Category</h3>
+                          <p className="text-slate-500 max-w-xs mx-auto mb-6">
+                            Start by creating a new {projectCategoryFilter === 'RD' ? 'R&D' : 'Delivery'} project.
+                          </p>
+                          <button 
+                            onClick={() => setShowNewProjectModal(true)}
+                            className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20"
+                          >
+                            <Plus className="w-4 h-4" />
+                            Create Project
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {mainView === 'CALENDAR' && (
+                <div className="bg-white border border-slate-200 rounded-2xl p-8">
+                  <div className="flex items-center justify-between mb-8">
+                    <h2 className="text-xl font-bold text-slate-900">Project Timeline</h2>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold">
+                        <div className="w-2 h-2 rounded-full bg-blue-500" />
+                        Tasks
+                      </div>
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-600 rounded-lg text-xs font-bold">
+                        <div className="w-2 h-2 rounded-full bg-amber-500" />
+                        Milestones
+                      </div>
+                    </div>
+                  </div>
+                  <Roadmap tasks={tasks} milestones={milestones} onTaskClick={(taskId) => setSelectedTaskId(taskId)} />
+                </div>
+              )}
+
+              {mainView === 'REPORTS' && (
+                <div className="space-y-8">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                      <h3 className="font-bold text-slate-900 mb-6">Methodology Split</h3>
+                      <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={chartData}
+                              innerRadius={60}
+                              outerRadius={80}
+                              paddingAngle={5}
+                              dataKey="value"
+                            >
+                              {chartData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                            <Legend />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                      <h3 className="font-bold text-slate-900 mb-6">Task Status Distribution</h3>
+                      <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={statusChartData}>
+                            <XAxis dataKey="name" fontSize={10} />
+                            <YAxis fontSize={10} />
+                            <Tooltip />
+                            <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                              {statusChartData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                    <h3 className="font-bold text-slate-900 mb-6">Project Progress Overview</h3>
+                    <div className="space-y-6">
+                      {projects.map(project => (
+                        <div key={project.id} className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-bold text-slate-700">{project.name}</span>
+                            <span className="text-xs font-bold text-slate-400">65%</span>
+                          </div>
+                          <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-blue-500 rounded-full" style={{ width: '65%' }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {mainView === 'RESOURCES' && (
+                <div className="space-y-8">
+                  {tasks.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {Array.from(new Set(tasks.map(t => t.owner))).map((owner, idx) => (
+                        <div key={idx} className="bg-white border border-slate-200 rounded-2xl p-6 hover:border-blue-300 transition-all group">
+                          <div className="flex items-center gap-4 mb-6">
+                            <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500 font-bold text-lg group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
+                              {owner.charAt(0)}
+                            </div>
+                            <div>
+                              <h3 className="font-bold text-slate-900">{owner}</h3>
+                              <p className="text-xs text-slate-500">Team Member</p>
+                            </div>
+                          </div>
+                          <div className="space-y-3">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="text-slate-500 font-medium">Active Tasks</span>
+                              <span className="font-bold text-slate-900">{tasks.filter(t => t.owner === owner).length}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="text-slate-500 font-medium">Workload</span>
+                              <span className="font-bold text-emerald-600">Optimal</span>
+                            </div>
+                            <div className="pt-4 border-t border-slate-50">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Current Focus</p>
+                              <p className="text-xs text-slate-700 truncate font-medium">
+                                {tasks.find(t => t.owner === owner)?.title || 'No active tasks'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
+                      <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Users className="w-8 h-8 text-slate-300" />
+                      </div>
+                      <h3 className="text-lg font-bold text-slate-900 mb-2">No Resources Found</h3>
+                      <p className="text-slate-500 max-w-xs mx-auto">
+                        Once you add tasks to your projects and assign owners, they will appear here for workload management.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </motion.div>
           ) : (
             <motion.div 
@@ -747,19 +1074,26 @@ export default function App() {
               className="space-y-6"
             >
               {/* Project Header Tabs */}
-              <div className="bg-white border border-slate-200 rounded-xl p-1 flex items-center gap-1 w-fit">
+              <div className="bg-white border border-slate-200 rounded-xl p-1 flex items-center gap-1 w-fit overflow-x-auto max-w-full">
                 {[
                   { id: 'OVERVIEW', label: 'Overview', icon: LayoutDashboard },
-                  ...(selectedProject?.type === 'RD' ? [{ id: 'BACKLOG', label: 'Backlog', icon: Layers }] : []),
-                  { id: 'TASKS', label: selectedProject?.type === 'RD' ? 'Scrum Board' : 'WBS / Tasks', icon: Layers },
+                  ...(selectedProject?.type === 'RD' ? [
+                    { id: 'BACKLOG', label: 'Backlog', icon: Layers },
+                    { id: 'TASKS', label: 'Scrum Board', icon: Layers },
+                  ] : [
+                    { id: 'WBS', label: 'WBS', icon: Layers },
+                    { id: 'ACTIVITY', label: 'Activity Task', icon: CheckCircle2 },
+                    { id: 'ROADMAP', label: 'Roadmap', icon: Calendar },
+                    { id: 'TIMEPLAN', label: 'Timeplan', icon: Clock },
+                  ]),
                   { id: 'RAID', label: 'RAID Log', icon: ShieldAlert },
-                  { id: 'ROADMAP', label: 'Roadmap', icon: Calendar },
+                  ...(selectedProject?.type === 'RD' ? [{ id: 'ROADMAP', label: 'Roadmap', icon: Calendar }] : []),
                 ].map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id as any)}
                     className={cn(
-                      "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all",
+                      "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap",
                       activeTab === tab.id ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "text-slate-500 hover:bg-slate-50"
                     )}
                   >
@@ -776,9 +1110,55 @@ export default function App() {
                     <div className="lg:col-span-2 space-y-8">
                       <div className="bg-white border border-slate-200 rounded-2xl p-8">
                         <div className="flex items-center justify-between mb-6">
-                          <h2 className="text-2xl font-bold text-slate-900">{selectedProject?.name}</h2>
+                          {isEditingName ? (
+                            <div className="flex items-center gap-2 flex-grow mr-4">
+                              <input
+                                type="text"
+                                value={editingNameValue}
+                                onChange={(e) => setEditingNameValue(e.target.value)}
+                                className="text-2xl font-bold text-slate-900 bg-slate-50 border-b-2 border-blue-500 outline-none px-2 py-1 w-full"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleUpdateProjectName();
+                                  if (e.key === 'Escape') setIsEditingName(false);
+                                }}
+                              />
+                              <button 
+                                onClick={handleUpdateProjectName}
+                                className="p-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors"
+                              >
+                                <Check className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={() => setIsEditingName(false)}
+                                className="p-2 bg-slate-200 text-slate-600 rounded-lg hover:bg-slate-300 transition-colors"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-3 group">
+                              {selectedProject?.name}
+                              <button 
+                                onClick={() => {
+                                  setEditingNameValue(selectedProject?.name || '');
+                                  setIsEditingName(true);
+                                }}
+                                className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-slate-100 rounded-md text-slate-400 transition-all"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            </h2>
+                          )}
                           <div className="flex items-center gap-2">
                             <button className="p-2 hover:bg-slate-50 rounded-lg text-slate-400 border border-slate-200"><Share2 className="w-4 h-4" /></button>
+                            <button 
+                              onClick={() => setShowDeleteConfirm(true)}
+                              className="p-2 hover:bg-red-50 rounded-lg text-red-400 border border-slate-200 hover:border-red-200 transition-colors"
+                              title="Delete Project"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                             <button className="p-2 hover:bg-slate-50 rounded-lg text-slate-400 border border-slate-200"><Settings className="w-4 h-4" /></button>
                           </div>
                         </div>
@@ -833,12 +1213,15 @@ export default function App() {
                               <Zap className="w-6 h-6" />
                               <h3 className="text-xl font-bold">R&D Lifecycle</h3>
                             </div>
-                            <button 
-                              onClick={handlePromoteToDelivery}
-                              className="bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-4 py-2 rounded-lg text-sm font-bold transition-all border border-white/20"
-                            >
-                              Promote to Delivery
-                            </button>
+                            {selectedProject.lifecycle !== 'DELIVERY' && (
+                              <button 
+                                onClick={handleAdvanceLifecycle}
+                                className="bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-4 py-2 rounded-lg text-sm font-bold transition-all border border-white/20 flex items-center gap-2"
+                              >
+                                <Zap className="w-4 h-4" />
+                                Advance Phase
+                              </button>
+                            )}
                           </div>
                           
                           <div className="flex items-center justify-between relative px-4">
@@ -988,17 +1371,99 @@ export default function App() {
                   </div>
                 )}
 
-                {activeTab === 'TASKS' && (
-                  selectedProject?.type === 'RD' ? (
-                    <AgileBoard 
-                      tasks={tasks} 
-                      onTaskUpdate={handleTaskUpdate} 
-                      onAddTask={(status) => selectedProjectId && handleAddTask(selectedProjectId, status)} 
-                      onTaskClick={(taskId) => setSelectedTaskId(taskId)}
-                    />
-                  ) : (
-                    <WaterfallView tasks={tasks} onTaskClick={(taskId) => setSelectedTaskId(taskId)} />
-                  )
+                {activeTab === 'TASKS' && selectedProject?.type === 'RD' && (
+                  <AgileBoard 
+                    tasks={tasks} 
+                    onTaskUpdate={handleTaskUpdate} 
+                    onAddTask={(status) => selectedProjectId && handleAddTask(selectedProjectId, status)} 
+                    onTaskClick={(taskId) => setSelectedTaskId(taskId)}
+                  />
+                )}
+
+                {activeTab === 'WBS' && selectedProject?.type === 'DELIVERY' && (
+                  <div className="space-y-6">
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                      <div className="flex items-center justify-between mb-6">
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-900">Work Breakdown Structure (WBS)</h3>
+                          <p className="text-xs text-slate-500">Hierarchical decomposition of the total scope of work.</p>
+                        </div>
+                        <button 
+                          onClick={() => selectedProjectId && handleAddTask(selectedProjectId, 'TODO')}
+                          className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 transition-all"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Add Activity
+                        </button>
+                      </div>
+                      <WaterfallView tasks={tasks} onTaskClick={(taskId) => setSelectedTaskId(taskId)} />
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'ACTIVITY' && selectedProject?.type === 'DELIVERY' && (
+                  <div className="space-y-6">
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                      <div className="flex items-center justify-between mb-6">
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-900">Activity Tasks</h3>
+                          <p className="text-xs text-slate-500">Detailed list of all project activities and their status.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="relative">
+                            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input type="text" placeholder="Filter activities..." className="pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 w-48" />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3">
+                        {tasks.map(task => (
+                          <div key={task.id} className="flex items-center justify-between p-4 bg-white border border-slate-100 rounded-xl hover:border-blue-200 hover:shadow-sm transition-all cursor-pointer group" onClick={() => setSelectedTaskId(task.id)}>
+                            <div className="flex items-center gap-4">
+                              <div className={cn(
+                                "w-10 h-10 rounded-xl flex items-center justify-center transition-colors",
+                                task.status === 'DONE' ? "bg-emerald-50 text-emerald-600" : 
+                                task.status === 'IN_PROGRESS' ? "bg-blue-50 text-blue-600" : "bg-slate-50 text-slate-400"
+                              )}>
+                                {task.status === 'DONE' ? <CheckCircle2 className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2 mb-0.5">
+                                  <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">{task.workstream}</span>
+                                  <span className="text-[10px] text-slate-300">•</span>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{task.phase}</span>
+                                </div>
+                                <h4 className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{task.title}</h4>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-8">
+                              <div className="text-right">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Owner</p>
+                                <p className="text-xs font-bold text-slate-700">{task.owner}</p>
+                              </div>
+                              <div className="text-right w-24">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">End Date</p>
+                                <p className="text-xs font-bold text-slate-700">{task.endDate || 'TBD'}</p>
+                              </div>
+                              <div className={cn(
+                                "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider",
+                                task.status === 'DONE' ? "bg-emerald-100 text-emerald-700" : 
+                                task.status === 'IN_PROGRESS' ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-600"
+                              )}>
+                                {task.status.replace('_', ' ')}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'TIMEPLAN' && selectedProject?.type === 'DELIVERY' && (
+                  <div className="space-y-6">
+                    <Roadmap tasks={tasks} milestones={milestones} onTaskClick={(taskId) => setSelectedTaskId(taskId)} />
+                  </div>
                 )}
 
                 {activeTab === 'RAID' && (
@@ -1231,6 +1696,40 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8"
+          >
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-6 mx-auto">
+              <Trash2 className="w-8 h-8 text-red-600" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-900 text-center mb-2">Delete Project?</h3>
+            <p className="text-slate-500 text-center mb-8">
+              Are you sure you want to delete <span className="font-bold text-slate-700">"{selectedProject?.name}"</span>? 
+              This will permanently remove all tasks, RAID items, and milestones. This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 px-4 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleDeleteProject}
+                disabled={isSaving}
+                className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+              >
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Delete Project"}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {selectedTaskId && tasks.find(t => t.id === selectedTaskId) && (
         <TaskModal
