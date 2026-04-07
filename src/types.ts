@@ -11,6 +11,7 @@ export interface Project {
   createdAt: number;
   updatedAt: number;
   lifecycle?: RDPhase; // Only for RD
+  rdCategory?: 'COLD' | 'HOT'; // Only for RD
   client?: string;
   startDate?: string;
   targetGoLive?: string;
@@ -54,4 +55,34 @@ export interface Milestone {
   phase: string;
   targetDate: string;
   status: 'PLANNED' | 'ACHIEVED' | 'DELAYED';
+}
+
+export interface Phase {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  startDate: string;
+  endDate: string;
+  order: number;
+  color?: string;
+}
+
+export interface DesignDoc {
+  id: string; // 'hld' or 'lld'
+  projectId: string;
+  content: string;
+  updatedAt: number;
+  updatedBy: string;
+}
+
+export interface ProjectFile {
+  id: string;
+  projectId: string;
+  docId: string; // 'hld' or 'lld'
+  name: string;
+  type: string;
+  size: number;
+  url: string;
+  uploadedAt: number;
 }

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Project } from '../types';
-import { Calendar, Users, ArrowRight, Briefcase, Zap } from 'lucide-react';
+import { Calendar, Users, ArrowRight, Briefcase, Zap, Flame, Snowflake } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 
@@ -19,11 +19,22 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick }) =>
       className="bg-white border border-slate-200 rounded-xl p-4 cursor-pointer hover:shadow-lg transition-all group"
     >
       <div className="flex items-start justify-between mb-3">
-        <div className={cn(
-          "px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider",
-          isRD ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
-        )}>
-          {isRD ? "R&D" : "Delivery"}
+        <div className="flex items-center gap-2">
+          <div className={cn(
+            "px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider",
+            isRD ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
+          )}>
+            {isRD ? "R&D" : "Delivery"}
+          </div>
+          {isRD && project.rdCategory && (
+            <div className={cn(
+              "px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider flex items-center gap-1",
+              project.rdCategory === 'HOT' ? "bg-orange-100 text-orange-700" : "bg-blue-50 text-blue-600"
+            )}>
+              {project.rdCategory === 'HOT' ? <Flame className="w-2.5 h-2.5" /> : <Snowflake className="w-2.5 h-2.5" />}
+              {project.rdCategory}
+            </div>
+          )}
         </div>
         <div className={cn(
           "w-1.5 h-1.5 rounded-full",

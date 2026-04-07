@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Project, Task, RAIDItem, Milestone, RDPhase } from './types';
+import { Project, Task, RAIDItem, Milestone, RDPhase, Phase, DesignDoc, ProjectFile } from './types';
 import { ProjectCard } from './components/ProjectCard';
 import { FileUpload } from './components/FileUpload';
 import { AgileBoard } from './components/AgileBoard';
 import { WaterfallView } from './components/WaterfallView';
 import { RAIDLog } from './components/RAIDLog';
 import { Roadmap } from './components/Roadmap';
+import { DataStory } from './components/DataStory';
 import { TaskModal } from './components/TaskModal';
 import { 
   LayoutDashboard, 
@@ -34,7 +35,11 @@ import {
   Trash2,
   Edit2,
   Check,
-  X
+  X,
+  FileText,
+  Layout,
+  Flame,
+  Snowflake
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -55,10 +60,11 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [mainView, setMainView] = useState<'DASHBOARD' | 'PROJECTS' | 'CALENDAR' | 'REPORTS' | 'RESOURCES'>('DASHBOARD');
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'TIMEPLAN'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'TIMEPLAN' | 'DATA_STORY'>('OVERVIEW');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [selectedTypeForCreation, setSelectedTypeForCreation] = useState<'RD' | 'DELIVERY' | null>(null);
+  const [selectedRDCategory, setSelectedRDCategory] = useState<'COLD' | 'HOT' | null>(null);
   const [selectingRDPhase, setSelectingRDPhase] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -69,11 +75,21 @@ export default function App() {
   const [editingNameValue, setEditingNameValue] = useState('');
   const [projectCategoryFilter, setProjectCategoryFilter] = useState<'RD' | 'DELIVERY' | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  
+  // Phase & Milestone Management
+  const [showPhaseModal, setShowPhaseModal] = useState(false);
+  const [editingPhase, setEditingPhase] = useState<Phase | null>(null);
+  const [showMilestoneModal, setShowMilestoneModal] = useState(false);
+  const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
+  const [targetPhaseNameForMilestone, setTargetPhaseNameForMilestone] = useState<string | null>(null);
 
   // Project data state
   const [tasks, setTasks] = useState<Task[]>([]);
   const [raidItems, setRaidItems] = useState<RAIDItem[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [phases, setPhases] = useState<Phase[]>([]);
+  const [designDocs, setDesignDocs] = useState<DesignDoc[]>([]);
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
 
   // Auth Listener
   useEffect(() => {
@@ -123,6 +139,9 @@ export default function App() {
       setTasks([]);
       setRaidItems([]);
       setMilestones([]);
+      setPhases([]);
+      setDesignDocs([]);
+      setProjectFiles([]);
       return;
     }
 
@@ -138,10 +157,25 @@ export default function App() {
       setMilestones(snapshot.docs.map(doc => doc.data() as Milestone));
     }, (error) => handleFirestoreError(error, OperationType.GET, `projects/${selectedProjectId}/milestones`));
 
+    const phasesUnsubscribe = onSnapshot(collection(db, 'projects', selectedProjectId, 'phases'), (snapshot) => {
+      setPhases(snapshot.docs.map(doc => doc.data() as Phase).sort((a, b) => a.order - b.order));
+    }, (error) => handleFirestoreError(error, OperationType.GET, `projects/${selectedProjectId}/phases`));
+
+    const designDocsUnsubscribe = onSnapshot(collection(db, 'projects', selectedProjectId, 'designDocs'), (snapshot) => {
+      setDesignDocs(snapshot.docs.map(doc => doc.data() as DesignDoc));
+    }, (error) => handleFirestoreError(error, OperationType.GET, `projects/${selectedProjectId}/designDocs`));
+
+    const filesUnsubscribe = onSnapshot(collection(db, 'projects', selectedProjectId, 'files'), (snapshot) => {
+      setProjectFiles(snapshot.docs.map(doc => doc.data() as ProjectFile));
+    }, (error) => handleFirestoreError(error, OperationType.GET, `projects/${selectedProjectId}/files`));
+
     return () => {
       tasksUnsubscribe();
       raidUnsubscribe();
       milestonesUnsubscribe();
+      phasesUnsubscribe();
+      designDocsUnsubscribe();
+      filesUnsubscribe();
     };
   }, [selectedProjectId, user]);
 
@@ -298,7 +332,7 @@ export default function App() {
     }
   };
 
-  const handleCreateManualProject = async (type: 'RD' | 'DELIVERY', lifecycle: RDPhase = 'IDEA') => {
+  const handleCreateManualProject = async (type: 'RD' | 'DELIVERY', lifecycle: RDPhase = 'IDEA', rdCategory?: 'COLD' | 'HOT') => {
     if (!user) return;
     setIsSaving(true);
 
@@ -313,11 +347,38 @@ export default function App() {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       startDate: new Date().toISOString().split('T')[0],
-      ...(type === 'RD' ? { lifecycle } : {})
+      ...(type === 'RD' ? { lifecycle, rdCategory } : {})
     };
 
     try {
       await setDoc(doc(db, 'projects', projectId), newProject);
+      
+      // Create initial phases for RD projects
+      if (type === 'RD') {
+        const batch = writeBatch(db);
+        const initialPhases = [
+          { name: 'Discovery', order: 0, color: 'bg-blue-500' },
+          { name: 'POC', order: 1, color: 'bg-indigo-500' },
+          { name: 'MVP', order: 2, color: 'bg-purple-500' },
+          { name: 'Delivery', order: 3, color: 'bg-emerald-500' }
+        ];
+        
+        initialPhases.forEach((p, idx) => {
+          const phaseId = Math.random().toString(36).substr(2, 9);
+          batch.set(doc(db, 'projects', projectId, 'phases', phaseId), {
+            id: phaseId,
+            projectId,
+            name: p.name,
+            description: `Initial ${p.name} phase.`,
+            startDate: new Date(Date.now() + idx * 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            endDate: new Date(Date.now() + (idx + 1) * 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            order: p.order,
+            color: p.color
+          });
+        });
+        await batch.commit();
+      }
+
       setSelectedProjectId(projectId);
       setShowNewProjectModal(false);
       setSelectingRDPhase(false);
@@ -327,6 +388,165 @@ export default function App() {
       handleFirestoreError(error, OperationType.WRITE, 'projects');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Phase Handlers
+  const handlePhaseAdd = () => {
+    setEditingPhase(null);
+    setShowPhaseModal(true);
+  };
+
+  const handlePhaseEdit = (phase: Phase) => {
+    setEditingPhase(phase);
+    setShowPhaseModal(true);
+  };
+
+  const handlePhaseDelete = async (phaseId: string) => {
+    if (!selectedProjectId) return;
+    try {
+      await deleteDoc(doc(db, 'projects', selectedProjectId, 'phases', phaseId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/phases/${phaseId}`);
+    }
+  };
+
+  const handlePhaseSave = async (phaseData: Partial<Phase>) => {
+    if (!selectedProjectId || !user) return;
+    setIsSaving(true);
+    try {
+      if (editingPhase) {
+        await updateDoc(doc(db, 'projects', selectedProjectId, 'phases', editingPhase.id), {
+          ...phaseData,
+          updatedAt: Date.now()
+        });
+      } else {
+        const phaseId = Math.random().toString(36).substr(2, 9);
+        const newPhase: Phase = {
+          id: phaseId,
+          projectId: selectedProjectId,
+          name: phaseData.name || 'New Phase',
+          description: phaseData.description || '',
+          startDate: phaseData.startDate || new Date().toISOString().split('T')[0],
+          endDate: phaseData.endDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          order: phases.length,
+          color: phaseData.color || 'bg-blue-500'
+        };
+        await setDoc(doc(db, 'projects', selectedProjectId, 'phases', phaseId), newPhase);
+      }
+      setShowPhaseModal(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `projects/${selectedProjectId}/phases`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Milestone Handlers
+  const handleMilestoneAdd = (phaseName: string) => {
+    setEditingMilestone(null);
+    setTargetPhaseNameForMilestone(phaseName);
+    setShowMilestoneModal(true);
+  };
+
+  const handleMilestoneEdit = (milestone: Milestone) => {
+    setEditingMilestone(milestone);
+    setTargetPhaseNameForMilestone(milestone.phase);
+    setShowMilestoneModal(true);
+  };
+
+  const handleMilestoneDelete = async (milestoneId: string) => {
+    if (!selectedProjectId) return;
+    try {
+      await deleteDoc(doc(db, 'projects', selectedProjectId, 'milestones', milestoneId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/milestones/${milestoneId}`);
+    }
+  };
+
+  const handleMilestoneSave = async (milestoneData: Partial<Milestone>) => {
+    if (!selectedProjectId || !user) return;
+    setIsSaving(true);
+    try {
+      if (editingMilestone) {
+        await updateDoc(doc(db, 'projects', selectedProjectId, 'milestones', editingMilestone.id), {
+          ...milestoneData,
+          updatedAt: Date.now()
+        });
+      } else {
+        const milestoneId = Math.random().toString(36).substr(2, 9);
+        const newMilestone: Milestone = {
+          id: milestoneId,
+          projectId: selectedProjectId,
+          name: milestoneData.name || 'New Milestone',
+          phase: targetPhaseNameForMilestone || 'General',
+          targetDate: milestoneData.targetDate || new Date().toISOString().split('T')[0],
+          status: 'PLANNED'
+        };
+        await setDoc(doc(db, 'projects', selectedProjectId, 'milestones', milestoneId), newMilestone);
+      }
+      setShowMilestoneModal(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `projects/${selectedProjectId}/milestones`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveDesignDoc = async (docId: 'hld' | 'lld', content: string) => {
+    if (!selectedProjectId || !user) return;
+    try {
+      await setDoc(doc(db, 'projects', selectedProjectId, 'designDocs', docId), {
+        id: docId,
+        projectId: selectedProjectId,
+        content,
+        updatedAt: Date.now(),
+        updatedBy: user.displayName || user.email || 'Unknown'
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `projects/${selectedProjectId}/designDocs/${docId}`);
+    }
+  };
+
+  const handleUploadProjectFile = async (docId: 'hld' | 'lld', file: File) => {
+    if (!selectedProjectId || !user) return;
+    
+    // Simulate upload by getting a data URL if small, or just a placeholder
+    let fileUrl = 'https://example.com/placeholder-file';
+    
+    if (file.size < 500000) { // < 500KB
+      fileUrl = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    const fileId = Math.random().toString(36).substr(2, 9);
+    const newFile: ProjectFile = {
+      id: fileId,
+      projectId: selectedProjectId,
+      docId,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      url: fileUrl,
+      uploadedAt: Date.now()
+    };
+
+    try {
+      await setDoc(doc(db, 'projects', selectedProjectId, 'files', fileId), newFile);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `projects/${selectedProjectId}/files/${fileId}`);
+    }
+  };
+
+  const handleDeleteProjectFile = async (fileId: string) => {
+    if (!selectedProjectId) return;
+    try {
+      await deleteDoc(doc(db, 'projects', selectedProjectId, 'files', fileId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/files/${fileId}`);
     }
   };
 
@@ -352,6 +572,26 @@ export default function App() {
       } finally {
         setIsSaving(false);
       }
+    }
+  };
+
+  const handleToggleRDCategory = async () => {
+    if (!selectedProjectId || !user) return;
+    const selectedProject = projects.find(p => p.id === selectedProjectId);
+    if (!selectedProject || selectedProject.type !== 'RD') return;
+
+    const nextCategory = selectedProject.rdCategory === 'HOT' ? 'COLD' : 'HOT';
+    setIsSaving(true);
+    try {
+      await updateDoc(doc(db, 'projects', selectedProjectId), {
+        rdCategory: nextCategory,
+        updatedAt: Date.now()
+      });
+    } catch (error) {
+      console.error("Error toggling RD category:", error);
+      handleFirestoreError(error, OperationType.UPDATE, `projects/${selectedProjectId}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -951,7 +1191,18 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                  <Roadmap tasks={tasks} milestones={milestones} onTaskClick={(taskId) => setSelectedTaskId(taskId)} />
+                  <Roadmap 
+                    tasks={tasks} 
+                    milestones={milestones} 
+                    phases={phases}
+                    onTaskClick={(taskId) => setSelectedTaskId(taskId)}
+                    onPhaseAdd={handlePhaseAdd}
+                    onPhaseEdit={handlePhaseEdit}
+                    onPhaseDelete={handlePhaseDelete}
+                    onMilestoneAdd={handleMilestoneAdd}
+                    onMilestoneEdit={handleMilestoneEdit}
+                    onMilestoneDelete={handleMilestoneDelete}
+                  />
                 </div>
               )}
 
@@ -1087,7 +1338,10 @@ export default function App() {
                     { id: 'TIMEPLAN', label: 'Timeplan', icon: Clock },
                   ]),
                   { id: 'RAID', label: 'RAID Log', icon: ShieldAlert },
-                  ...(selectedProject?.type === 'RD' ? [{ id: 'ROADMAP', label: 'Roadmap', icon: Calendar }] : []),
+                  ...(selectedProject?.type === 'RD' ? [
+                    { id: 'ROADMAP', label: 'Roadmap', icon: Calendar },
+                    { id: 'DATA_STORY', label: 'Data Story', icon: FileText }
+                  ] : []),
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -1175,6 +1429,42 @@ export default function App() {
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Methodology</p>
                             <p className="text-sm font-bold text-blue-600">{selectedProject?.type === 'RD' ? 'Agile / R&D' : 'Waterfall / Delivery'}</p>
                           </div>
+                          {selectedProject?.type === 'RD' && (
+                            <>
+                              <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 group/cat relative">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">R&D Category</p>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5">
+                                    {selectedProject.rdCategory === 'HOT' ? (
+                                      <Flame className="w-3.5 h-3.5 text-orange-500" />
+                                    ) : (
+                                      <Snowflake className="w-3.5 h-3.5 text-blue-400" />
+                                    )}
+                                    <p className={cn(
+                                      "text-sm font-bold",
+                                      selectedProject.rdCategory === 'HOT' ? "text-orange-600" : "text-blue-600"
+                                    )}>
+                                      {selectedProject.rdCategory || 'NOT SET'}
+                                    </p>
+                                  </div>
+                                  <button 
+                                    onClick={handleToggleRDCategory}
+                                    disabled={isSaving}
+                                    className="p-1 hover:bg-white rounded border border-transparent hover:border-slate-200 text-[10px] font-bold text-blue-600 transition-all opacity-0 group-hover/cat:opacity-100"
+                                  >
+                                    Switch
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Current Phase</p>
+                                <div className="flex items-center gap-1.5 text-purple-600">
+                                  <Zap className="w-3.5 h-3.5" />
+                                  <p className="text-sm font-bold">{selectedProject.lifecycle}</p>
+                                </div>
+                              </div>
+                            </>
+                          )}
                           <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Start Date</p>
                             <p className="text-sm font-bold text-slate-900">{selectedProject?.startDate}</p>
@@ -1462,7 +1752,18 @@ export default function App() {
 
                 {activeTab === 'TIMEPLAN' && selectedProject?.type === 'DELIVERY' && (
                   <div className="space-y-6">
-                    <Roadmap tasks={tasks} milestones={milestones} onTaskClick={(taskId) => setSelectedTaskId(taskId)} />
+                    <Roadmap 
+                      tasks={tasks} 
+                      milestones={milestones} 
+                      phases={phases}
+                      onTaskClick={(taskId) => setSelectedTaskId(taskId)}
+                      onPhaseAdd={handlePhaseAdd}
+                      onPhaseEdit={handlePhaseEdit}
+                      onPhaseDelete={handlePhaseDelete}
+                      onMilestoneAdd={handleMilestoneAdd}
+                      onMilestoneEdit={handleMilestoneEdit}
+                      onMilestoneDelete={handleMilestoneDelete}
+                    />
                   </div>
                 )}
 
@@ -1479,7 +1780,25 @@ export default function App() {
                   <Roadmap 
                     tasks={tasks} 
                     milestones={milestones} 
+                    phases={phases}
                     onTaskClick={(taskId) => setSelectedTaskId(taskId)}
+                    onPhaseAdd={handlePhaseAdd}
+                    onPhaseEdit={handlePhaseEdit}
+                    onPhaseDelete={handlePhaseDelete}
+                    onMilestoneAdd={handleMilestoneAdd}
+                    onMilestoneEdit={handleMilestoneEdit}
+                    onMilestoneDelete={handleMilestoneDelete}
+                  />
+                )}
+
+                {activeTab === 'DATA_STORY' && (
+                  <DataStory 
+                    hld={designDocs.find(d => d.id === 'hld') || null}
+                    lld={designDocs.find(d => d.id === 'lld') || null}
+                    files={projectFiles}
+                    onSaveDoc={handleSaveDesignDoc}
+                    onUploadFile={handleUploadProjectFile}
+                    onDeleteFile={handleDeleteProjectFile}
                   />
                 )}
               </div>
@@ -1525,6 +1844,7 @@ export default function App() {
                 <button onClick={() => {
                   setShowNewProjectModal(false);
                   setSelectingRDPhase(false);
+                  setSelectedRDCategory(null);
                   setSelectedTypeForCreation(null);
                   setNewProjectName('');
                 }} className="p-2 hover:bg-slate-50 rounded-lg text-slate-400">
@@ -1613,6 +1933,7 @@ export default function App() {
                             <button 
                               onClick={() => {
                                 setSelectedTypeForCreation(null);
+                                setSelectedRDCategory(null);
                                 setSelectingRDPhase(false);
                               }} 
                               className="text-[10px] font-bold text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition-colors"
@@ -1629,35 +1950,70 @@ export default function App() {
                             </div>
 
                             <div className="grid grid-cols-1 gap-4">
-                              {selectedTypeForCreation === 'RD' && !selectingRDPhase ? (
-                                <button 
-                                  onClick={() => setSelectingRDPhase(true)}
-                                  className="w-full p-6 bg-white border-2 border-slate-100 rounded-2xl text-left hover:border-purple-400 hover:bg-purple-50 transition-all group"
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-4">
-                                      <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center group-hover:bg-purple-100 transition-colors">
-                                        <Layers className="w-6 h-6 text-purple-600" />
-                                      </div>
-                                      <div>
-                                        <h4 className="font-bold text-slate-900">Configure R&D Phase</h4>
-                                        <p className="text-xs text-slate-500">Choose your starting point in the lifecycle.</p>
-                                      </div>
-                                    </div>
-                                    <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-purple-400 transition-colors" />
-                                  </div>
-                                </button>
-                              ) : selectedTypeForCreation === 'RD' && selectingRDPhase ? (
+                              {selectedTypeForCreation === 'RD' && !selectedRDCategory ? (
                                 <div className="space-y-4 p-2">
                                   <div className="flex items-center justify-between">
-                                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Initial Phase</h4>
+                                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Step 3: Select Project Category</h4>
+                                    <button onClick={() => setSelectedTypeForCreation(null)} className="text-[10px] font-bold text-blue-600 hover:underline">Back</button>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <button 
+                                      onClick={() => setSelectedRDCategory('HOT')}
+                                      className="p-6 border-2 border-slate-100 rounded-2xl text-left hover:border-orange-400 hover:bg-orange-50 transition-all group"
+                                    >
+                                      <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center mb-3 group-hover:bg-orange-200 transition-colors">
+                                        <Flame className="w-5 h-5 text-orange-600" />
+                                      </div>
+                                      <h4 className="font-bold text-slate-900 mb-1">Hot Project</h4>
+                                      <p className="text-[10px] text-slate-500">Active, high-priority exploration.</p>
+                                    </button>
+                                    <button 
+                                      onClick={() => setSelectedRDCategory('COLD')}
+                                      className="p-6 border-2 border-slate-100 rounded-2xl text-left hover:border-blue-400 hover:bg-blue-50 transition-all group"
+                                    >
+                                      <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center mb-3 group-hover:bg-blue-200 transition-colors">
+                                        <Snowflake className="w-5 h-5 text-blue-600" />
+                                      </div>
+                                      <h4 className="font-bold text-slate-900 mb-1">Cold Project</h4>
+                                      <p className="text-[10px] text-slate-500">Backlog, low-priority or on-hold exploration.</p>
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : selectedTypeForCreation === 'RD' && selectedRDCategory && !selectingRDPhase ? (
+                                <div className="space-y-4">
+                                  <div className="flex items-center justify-between px-2">
+                                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Step 4: Configure Phase</h4>
+                                    <button onClick={() => setSelectedRDCategory(null)} className="text-[10px] font-bold text-blue-600 hover:underline">Back</button>
+                                  </div>
+                                  <button 
+                                    onClick={() => setSelectingRDPhase(true)}
+                                    className="w-full p-6 bg-white border-2 border-slate-100 rounded-2xl text-left hover:border-purple-400 hover:bg-purple-50 transition-all group"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-4">
+                                        <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center group-hover:bg-purple-100 transition-colors">
+                                          <Layers className="w-6 h-6 text-purple-600" />
+                                        </div>
+                                        <div>
+                                          <h4 className="font-bold text-slate-900">Configure R&D Phase</h4>
+                                          <p className="text-xs text-slate-500">Choose your starting point in the lifecycle.</p>
+                                        </div>
+                                      </div>
+                                      <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-purple-400 transition-colors" />
+                                    </div>
+                                  </button>
+                                </div>
+                              ) : selectedTypeForCreation === 'RD' && selectedRDCategory && selectingRDPhase ? (
+                                <div className="space-y-4 p-2">
+                                  <div className="flex items-center justify-between">
+                                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Step 4: Select Initial Phase</h4>
                                     <button onClick={() => setSelectingRDPhase(false)} className="text-[10px] font-bold text-blue-600 hover:underline">Back</button>
                                   </div>
                                   <div className="grid grid-cols-2 gap-3">
                                     {(['IDEA', 'POC', 'MVP', 'DELIVERY'] as RDPhase[]).map((phase) => (
                                       <button
                                         key={phase}
-                                        onClick={() => handleCreateManualProject('RD', phase)}
+                                        onClick={() => handleCreateManualProject('RD', phase, selectedRDCategory)}
                                         className="p-4 border-2 border-slate-100 rounded-xl text-sm font-bold text-slate-700 hover:bg-purple-50 hover:border-purple-200 transition-all text-center bg-white"
                                       >
                                         {phase}
@@ -1738,6 +2094,117 @@ export default function App() {
           onClose={() => setSelectedTaskId(null)}
           onUpdate={handleTaskUpdate}
         />
+      )}
+
+      {/* Phase Modal */}
+      {showPhaseModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <h3 className="text-lg font-bold text-slate-900">{editingPhase ? 'Edit Phase' : 'Add New Phase'}</h3>
+              <button onClick={() => setShowPhaseModal(false)} className="p-2 hover:bg-white rounded-xl text-slate-400 transition-colors"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.currentTarget);
+              handlePhaseSave({
+                name: formData.get('name') as string,
+                description: formData.get('description') as string,
+                startDate: formData.get('startDate') as string,
+                endDate: formData.get('endDate') as string,
+                color: formData.get('color') as string
+              });
+            }} className="p-6 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Phase Name</label>
+                <input name="name" defaultValue={editingPhase?.name} required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Description</label>
+                <textarea name="description" defaultValue={editingPhase?.description} rows={3} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none resize-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Start Date</label>
+                  <input type="date" name="startDate" defaultValue={editingPhase?.startDate || new Date().toISOString().split('T')[0]} required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">End Date</label>
+                  <input type="date" name="endDate" defaultValue={editingPhase?.endDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]} required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Theme Color</label>
+                <select name="color" defaultValue={editingPhase?.color || 'bg-blue-500'} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none">
+                  <option value="bg-blue-500">Blue</option>
+                  <option value="bg-emerald-500">Emerald</option>
+                  <option value="bg-indigo-500">Indigo</option>
+                  <option value="bg-purple-500">Purple</option>
+                  <option value="bg-amber-500">Amber</option>
+                  <option value="bg-rose-500">Rose</option>
+                </select>
+              </div>
+              <div className="pt-4 flex gap-3">
+                <button type="button" onClick={() => setShowPhaseModal(false)} className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+                <button type="submit" disabled={isSaving} className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingPhase ? 'Update Phase' : 'Create Phase')}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Milestone Modal */}
+      {showMilestoneModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <h3 className="text-lg font-bold text-slate-900">{editingMilestone ? 'Edit Milestone' : 'Add Milestone'}</h3>
+              <button onClick={() => setShowMilestoneModal(false)} className="p-2 hover:bg-white rounded-xl text-slate-400 transition-colors"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.currentTarget);
+              handleMilestoneSave({
+                name: formData.get('name') as string,
+                targetDate: formData.get('targetDate') as string,
+                status: formData.get('status') as Milestone['status']
+              });
+            }} className="p-6 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Milestone Name</label>
+                <input name="name" defaultValue={editingMilestone?.name} required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Target Date</label>
+                <input type="date" name="targetDate" defaultValue={editingMilestone?.targetDate || new Date().toISOString().split('T')[0]} required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Status</label>
+                <select name="status" defaultValue={editingMilestone?.status || 'PLANNED'} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none">
+                  <option value="PLANNED">Planned</option>
+                  <option value="ACHIEVED">Achieved</option>
+                  <option value="DELAYED">Delayed</option>
+                </select>
+              </div>
+              <div className="pt-4 flex gap-3">
+                <button type="button" onClick={() => setShowMilestoneModal(false)} className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+                <button type="submit" disabled={isSaving} className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingMilestone ? 'Update Milestone' : 'Add Milestone')}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
       )}
     </div>
   );

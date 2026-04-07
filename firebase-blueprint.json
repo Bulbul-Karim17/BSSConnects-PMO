@@ -13,6 +13,7 @@
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" },
         "lifecycle": { "type": "string", "enum": ["IDEA", "POC", "MVP", "DELIVERY"] },
+        "rdCategory": { "type": "string", "enum": ["COLD", "HOT"] },
         "client": { "type": "string" },
         "startDate": { "type": "string" },
         "targetGoLive": { "type": "string" },
@@ -71,6 +72,51 @@
         "status": { "type": "string", "enum": ["PLANNED", "ACHIEVED", "DELAYED"] }
       },
       "required": ["id", "projectId", "name", "phase", "targetDate", "status"]
+    },
+    "Phase": {
+      "title": "Phase",
+      "description": "A project phase for the roadmap.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "order": { "type": "number" },
+        "color": { "type": "string" }
+      },
+      "required": ["id", "projectId", "name", "startDate", "endDate", "order"]
+    },
+    "DesignDoc": {
+      "title": "DesignDoc",
+      "description": "A design document (HLD or LLD).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "content": { "type": "string" },
+        "updatedAt": { "type": "number" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "projectId", "content", "updatedAt", "updatedBy"]
+    },
+    "ProjectFile": {
+      "title": "ProjectFile",
+      "description": "A file uploaded to a project document.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "docId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "size": { "type": "number" },
+        "url": { "type": "string" },
+        "uploadedAt": { "type": "number" }
+      },
+      "required": ["id", "projectId", "docId", "name", "type", "size", "url", "uploadedAt"]
     }
   },
   "firestore": {
@@ -89,6 +135,18 @@
     "/projects/{projectId}/milestones/{milestoneId}": {
       "schema": "Milestone",
       "description": "Milestones associated with a project."
+    },
+    "/projects/{projectId}/phases/{phaseId}": {
+      "schema": "Phase",
+      "description": "Phases associated with a project roadmap."
+    },
+    "/projects/{projectId}/designDocs/{docId}": {
+      "schema": "DesignDoc",
+      "description": "Design documents (HLD/LLD) for a project."
+    },
+    "/projects/{projectId}/files/{fileId}": {
+      "schema": "ProjectFile",
+      "description": "Files uploaded to a project."
     }
   }
 }

@@ -16,6 +16,7 @@ service cloud.firestore {
     //   - createdAt: number (required)
     //   - updatedAt: number (required)
     //   - lifecycle: string (optional, enum: ["IDEA", "POC", "MVP", "DELIVERY"])
+    //   - rdCategory: string (optional, enum: ["COLD", "HOT"])
     //   - client: string (optional, size < 100)
     //   - startDate: string (optional, ISO 8601)
     //   - targetGoLive: string (optional, ISO 8601)
@@ -92,6 +93,7 @@ service cloud.firestore {
              data.status in ["PLANNED", "ACTIVE", "COMPLETED", "ON_HOLD"] &&
              data.createdAt is number &&
              data.updatedAt is number &&
+             (!('rdCategory' in data) || data.rdCategory in ["COLD", "HOT"]) &&
              (data.ownerId == request.auth.uid || (isAdmin() && data.ownerId != null));
     }
 
@@ -119,6 +121,32 @@ service cloud.firestore {
              data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
              data.phase is string && data.phase.size() < 100 &&
              data.status in ["PLANNED", "ACHIEVED", "DELAYED"];
+    }
+
+    function isValidPhase(data) {
+      return data.keys().hasAll(['id', 'projectId', 'name', 'startDate', 'endDate', 'order']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.startDate is string &&
+             data.endDate is string &&
+             data.order is number &&
+             (!('description' in data) || (data.description is string && data.description.size() < 1000));
+    }
+
+    function isValidDesignDoc(data) {
+      return data.keys().hasAll(['id', 'projectId', 'content', 'updatedAt', 'updatedBy']) &&
+             data.id in ['hld', 'lld'] &&
+             data.content is string &&
+             data.updatedAt is number &&
+             data.updatedBy is string;
+    }
+
+    function isValidProjectFile(data) {
+      return data.keys().hasAll(['id', 'projectId', 'docId', 'name', 'type', 'size', 'url', 'uploadedAt']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.type is string &&
+             data.size is number &&
+             data.url is string &&
+             data.uploadedAt is number;
     }
 
     // ===============================================================
@@ -159,6 +187,25 @@ service cloud.firestore {
         allow read: if isProjectOwner(projectId);
         allow create: if isProjectOwner(projectId) && isValidMilestone(request.resource.data);
         allow update: if isProjectOwner(projectId) && isValidMilestone(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+
+      match /phases/{phaseId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId) && isValidPhase(request.resource.data);
+        allow update: if isProjectOwner(projectId) && isValidPhase(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+
+      match /designDocs/{docId} {
+        allow read: if isProjectOwner(projectId);
+        allow create, update: if isProjectOwner(projectId) && isValidDesignDoc(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+
+      match /files/{fileId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId) && isValidProjectFile(request.resource.data);
         allow delete: if isProjectOwner(projectId);
       }
     }
