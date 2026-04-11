@@ -27,7 +27,7 @@ interface DataStoryProps {
   files: ProjectFile[];
   onSaveDoc: (id: 'hld' | 'lld', content: string) => Promise<void>;
   onUploadFile: (docId: 'hld' | 'lld', file: File) => Promise<void>;
-  onDeleteFile: (fileId: string) => Promise<void>;
+  onDeleteFile: (fileId: string) => void;
 }
 
 export const DataStory: React.FC<DataStoryProps> = ({ 

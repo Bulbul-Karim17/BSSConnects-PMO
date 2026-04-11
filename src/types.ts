@@ -16,6 +16,10 @@ export interface Project {
   startDate?: string;
   targetGoLive?: string;
   ownerId: string;
+  meetingAttendance?: string;
+  meetingDate?: string;
+  meetingOwner?: string;
+  meetingSummary?: string;
 }
 
 export interface Task {
@@ -33,6 +37,22 @@ export interface Task {
   phase?: string; // For Waterfall
   objective?: string;
   acceptanceCriteria?: string;
+  sprintId?: string; // For Agile
+  parentId?: string; // For WBS hierarchy (3 layers)
+  comments?: string;
+  momDetails?: string; // Minutes of Meeting details
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface Sprint {
+  id: string;
+  projectId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  status: 'PLANNED' | 'ACTIVE' | 'COMPLETED';
+  goal?: string;
 }
 
 export interface RAIDItem {

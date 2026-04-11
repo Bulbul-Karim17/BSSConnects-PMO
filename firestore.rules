@@ -94,6 +94,10 @@ service cloud.firestore {
              data.createdAt is number &&
              data.updatedAt is number &&
              (!('rdCategory' in data) || data.rdCategory in ["COLD", "HOT"]) &&
+             (!('meetingAttendance' in data) || (data.meetingAttendance is string && data.meetingAttendance.size() < 2000)) &&
+             (!('meetingDate' in data) || (data.meetingDate is string && data.meetingDate.size() < 100)) &&
+             (!('meetingOwner' in data) || (data.meetingOwner is string && data.meetingOwner.size() < 200)) &&
+             (!('meetingSummary' in data) || (data.meetingSummary is string && data.meetingSummary.size() < 5000)) &&
              (data.ownerId == request.auth.uid || (isAdmin() && data.ownerId != null));
     }
 
@@ -102,7 +106,21 @@ service cloud.firestore {
              data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
              data.status in ["BACKLOG", "TODO", "IN_PROGRESS", "DONE", "BLOCKED"] &&
              data.workstream is string && data.workstream.size() < 100 &&
-             data.owner is string && data.owner.size() < 100;
+             data.owner is string && data.owner.size() < 100 &&
+             (!('sprintId' in data) || (data.sprintId is string && data.sprintId.size() < 50)) &&
+             (!('parentId' in data) || (data.parentId is string && data.parentId.size() < 50)) &&
+             (!('dependencies' in data) || (data.dependencies is list && data.dependencies.size() < 50)) &&
+             (!('comments' in data) || (data.comments is string && data.comments.size() < 2000)) &&
+             (!('momDetails' in data) || (data.momDetails is string && data.momDetails.size() < 5000));
+    }
+
+    function isValidSprint(data) {
+      return data.keys().hasAll(['id', 'projectId', 'name', 'startDate', 'endDate', 'status']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.startDate is string &&
+             data.endDate is string &&
+             data.status in ["PLANNED", "ACTIVE", "COMPLETED"] &&
+             (!('goal' in data) || (data.goal is string && data.goal.size() < 500));
     }
 
     function isValidRAIDItem(data) {
@@ -194,6 +212,13 @@ service cloud.firestore {
         allow read: if isProjectOwner(projectId);
         allow create: if isProjectOwner(projectId) && isValidPhase(request.resource.data);
         allow update: if isProjectOwner(projectId) && isValidPhase(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+
+      match /sprints/{sprintId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId) && isValidSprint(request.resource.data);
+        allow update: if isProjectOwner(projectId) && isValidSprint(request.resource.data);
         allow delete: if isProjectOwner(projectId);
       }
 

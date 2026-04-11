@@ -1,18 +1,32 @@
 import React from 'react';
 import { Task } from '../types';
-import { X, User, Calendar, Flag, CheckCircle2, Layout, Target, ListChecks, FileText } from 'lucide-react';
+import { X, User, Calendar, Flag, CheckCircle2, Layout, Target, ListChecks, FileText, Link as LinkIcon, Plus, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 
 interface TaskModalProps {
   task: Task;
+  allTasks: Task[];
   isOpen: boolean;
   onClose: () => void;
   onUpdate: (taskId: string, updates: Partial<Task>) => void;
 }
 
-export const TaskModal: React.FC<TaskModalProps> = ({ task, isOpen, onClose, onUpdate }) => {
+export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, isOpen, onClose, onUpdate }) => {
   if (!isOpen) return null;
+
+  const otherTasks = allTasks.filter(t => t.id !== task.id);
+  const dependencies = task.dependencies || [];
+
+  const handleAddDependency = (depId: string) => {
+    if (!dependencies.includes(depId)) {
+      onUpdate(task.id, { dependencies: [...dependencies, depId] });
+    }
+  };
+
+  const handleRemoveDependency = (depId: string) => {
+    onUpdate(task.id, { dependencies: dependencies.filter(id => id !== depId) });
+  };
 
   return (
     <AnimatePresence>
@@ -130,6 +144,76 @@ export const TaskModal: React.FC<TaskModalProps> = ({ task, isOpen, onClose, onU
                 className="w-full text-sm text-slate-600 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500/20 p-4 transition-all min-h-[120px] leading-relaxed font-mono"
                 placeholder="- Criterion 1&#10;- Criterion 2&#10;- Criterion 3"
               />
+            </div>
+
+            {/* MoM Details */}
+            <div className="space-y-3">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <FileText className="w-3 h-3" />
+                Minutes of Meeting (MoM)
+              </label>
+              <textarea
+                value={task.momDetails || ''}
+                onChange={(e) => onUpdate(task.id, { momDetails: e.target.value })}
+                className="w-full text-sm text-slate-600 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500/20 p-4 transition-all min-h-[120px] leading-relaxed"
+                placeholder="Add meeting notes, decisions, and key takeaways here..."
+              />
+            </div>
+
+            {/* Dependencies */}
+            <div className="space-y-4">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <LinkIcon className="w-3 h-3" />
+                Dependencies
+              </label>
+              
+              <div className="space-y-2">
+                {dependencies.map(depId => {
+                  const depTask = allTasks.find(t => t.id === depId);
+                  return (
+                    <div key={depId} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl group hover:bg-slate-100 transition-all">
+                      <div className="flex items-center gap-3 overflow-hidden">
+                        <div className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
+                        <span className="text-sm text-slate-700 truncate font-medium">
+                          {depTask ? depTask.title : 'Unknown Task'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveDependency(depId)}
+                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })}
+                
+                {dependencies.length === 0 && (
+                  <p className="text-xs text-slate-400 italic px-1">No dependencies linked yet.</p>
+                )}
+              </div>
+
+              <div className="pt-2">
+                <select
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      handleAddDependency(e.target.value);
+                      e.target.value = '';
+                    }
+                  }}
+                  className="w-full text-sm text-slate-500 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-blue-500/20 p-3 transition-all appearance-none cursor-pointer hover:bg-slate-100"
+                  defaultValue=""
+                >
+                  <option value="" disabled>+ Add Dependency...</option>
+                  {otherTasks
+                    .filter(t => !dependencies.includes(t.id))
+                    .map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.title}
+                      </option>
+                    ))}
+                </select>
+              </div>
             </div>
           </div>
 

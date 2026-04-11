@@ -1,9 +1,22 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Project, Task, RAIDItem, Milestone } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let ai: GoogleGenAI | null = null;
+
+function getGenAI() {
+  if (!ai) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
+      console.error("Gemini API Key is missing or invalid. Please check your environment variables.");
+      throw new Error("Gemini API Key is not configured correctly. Please set it in the project settings.");
+    }
+    ai = new GoogleGenAI({ apiKey });
+  }
+  return ai;
+}
 
 export async function analyzeProjectFile(fileBase64: string, mimeType: string) {
+  const genAI = getGenAI();
   const model = "gemini-3-flash-preview";
 
   const prompt = `
@@ -54,18 +67,78 @@ export async function analyzeProjectFile(fileBase64: string, mimeType: string) {
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await genAI.models.generateContent({
       model,
-      contents: [
-        {
-          parts: [
-            { text: prompt },
-            { inlineData: { data: fileBase64, mimeType } }
-          ]
-        }
-      ],
+      contents: {
+        parts: [
+          { text: prompt },
+          { inlineData: { data: fileBase64, mimeType } }
+        ]
+      },
       config: {
         responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            project: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                description: { type: Type.STRING },
+                type: { type: Type.STRING, enum: ["RD", "DELIVERY"] },
+                client: { type: Type.STRING },
+                startDate: { type: Type.STRING },
+                targetGoLive: { type: Type.STRING }
+              },
+              required: ["name", "type"]
+            },
+            tasks: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  status: { type: Type.STRING, enum: ["BACKLOG", "TODO", "IN_PROGRESS", "DONE", "BLOCKED"] },
+                  workstream: { type: Type.STRING },
+                  owner: { type: Type.STRING },
+                  startDate: { type: Type.STRING },
+                  endDate: { type: Type.STRING },
+                  phase: { type: Type.STRING }
+                },
+                required: ["title"]
+              }
+            },
+            raid: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  type: { type: Type.STRING, enum: ["RISK", "ASSUMPTION", "DEPENDENCY", "ISSUE"] },
+                  category: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  impact: { type: Type.STRING, enum: ["LOW", "MEDIUM", "HIGH"] },
+                  owner: { type: Type.STRING },
+                  status: { type: Type.STRING, enum: ["OPEN", "CLOSED"] },
+                  mitigation: { type: Type.STRING }
+                },
+                required: ["type", "description"]
+              }
+            },
+            milestones: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  phase: { type: Type.STRING },
+                  targetDate: { type: Type.STRING }
+                },
+                required: ["name"]
+              }
+            }
+          }
+        }
       }
     });
 

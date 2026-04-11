@@ -17,7 +17,11 @@
         "client": { "type": "string" },
         "startDate": { "type": "string" },
         "targetGoLive": { "type": "string" },
-        "ownerId": { "type": "string" }
+        "ownerId": { "type": "string" },
+        "meetingAttendance": { "type": "string" },
+        "meetingDate": { "type": "string" },
+        "meetingOwner": { "type": "string" },
+        "meetingSummary": { "type": "string" }
       },
       "required": ["id", "name", "type", "status", "createdAt", "updatedAt", "ownerId"]
     },
@@ -37,9 +41,28 @@
         "endDate": { "type": "string" },
         "duration": { "type": "number" },
         "dependencies": { "type": "array", "items": { "type": "string" } },
-        "phase": { "type": "string" }
+        "phase": { "type": "string" },
+        "sprintId": { "type": "string" },
+        "parentId": { "type": "string" },
+        "comments": { "type": "string" },
+        "momDetails": { "type": "string" }
       },
       "required": ["id", "projectId", "title", "status", "workstream", "owner"]
+    },
+    "Sprint": {
+      "title": "Sprint",
+      "description": "A sprint within an Agile project.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "name": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["PLANNED", "ACTIVE", "COMPLETED"] },
+        "goal": { "type": "string" }
+      },
+      "required": ["id", "projectId", "name", "startDate", "endDate", "status"]
     },
     "RAIDItem": {
       "title": "RAIDItem",
@@ -139,6 +162,10 @@
     "/projects/{projectId}/phases/{phaseId}": {
       "schema": "Phase",
       "description": "Phases associated with a project roadmap."
+    },
+    "/projects/{projectId}/sprints/{sprintId}": {
+      "schema": "Sprint",
+      "description": "Sprints associated with an Agile project."
     },
     "/projects/{projectId}/designDocs/{docId}": {
       "schema": "DesignDoc",

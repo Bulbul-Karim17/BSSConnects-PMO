@@ -23,18 +23,23 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileAnalyzed, classNam
 
     try {
       const reader = new FileReader();
-      reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        const { analyzeProjectFile } = await import('../services/geminiService');
-        const result = await analyzeProjectFile(base64, file.type);
-        onFileAnalyzed(result);
-        setSuccess(true);
-      };
-      reader.onerror = () => setError('Failed to read file');
-      reader.readAsDataURL(file);
+      
+      const fileData = await new Promise<{ base64: string; type: string }>((resolve, reject) => {
+        reader.onload = () => {
+          const base64 = (reader.result as string).split(',')[1];
+          resolve({ base64, type: file.type });
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+
+      const { analyzeProjectFile } = await import('../services/geminiService');
+      const result = await analyzeProjectFile(fileData.base64, fileData.type);
+      onFileAnalyzed(result);
+      setSuccess(true);
     } catch (err) {
-      console.error(err);
-      setError('Analysis failed. Please try again.');
+      console.error("File analysis error:", err);
+      setError(err instanceof Error ? err.message : 'Analysis failed. Please try again.');
     } finally {
       setIsAnalyzing(false);
     }

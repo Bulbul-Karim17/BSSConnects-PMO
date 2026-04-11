@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Project, Task, RAIDItem, Milestone, RDPhase, Phase, DesignDoc, ProjectFile } from './types';
+import { Project, Task, RAIDItem, Milestone, RDPhase, Phase, DesignDoc, ProjectFile, Sprint } from './types';
 import { ProjectCard } from './components/ProjectCard';
 import { FileUpload } from './components/FileUpload';
 import { AgileBoard } from './components/AgileBoard';
+import { WBSView } from './components/WBSView';
 import { WaterfallView } from './components/WaterfallView';
 import { RAIDLog } from './components/RAIDLog';
 import { Roadmap } from './components/Roadmap';
@@ -47,7 +48,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, 
 
 import { initializeApp } from 'firebase/app';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User as FirebaseUser } from 'firebase/auth';
-import { collection, onSnapshot, query, where, doc, setDoc, updateDoc, deleteDoc, getDocFromServer, writeBatch } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc, setDoc, updateDoc, deleteDoc, getDocFromServer, writeBatch, deleteField } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { OperationType, handleFirestoreError } from './lib/firestore-errors';
 
@@ -60,7 +61,7 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [mainView, setMainView] = useState<'DASHBOARD' | 'PROJECTS' | 'CALENDAR' | 'REPORTS' | 'RESOURCES'>('DASHBOARD');
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'TIMEPLAN' | 'DATA_STORY'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'DATA_STORY'>('OVERVIEW');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [selectedTypeForCreation, setSelectedTypeForCreation] = useState<'RD' | 'DELIVERY' | null>(null);
@@ -83,11 +84,37 @@ export default function App() {
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [targetPhaseNameForMilestone, setTargetPhaseNameForMilestone] = useState<string | null>(null);
 
+  // WBS File Upload
+  const [showWBSFileUpload, setShowWBSFileUpload] = useState(false);
+  const [targetTaskIdForFile, setTargetTaskIdForFile] = useState<string | null>(null);
+  const [showWorkstreamModal, setShowWorkstreamModal] = useState(false);
+  const [newWorkstreamName, setNewWorkstreamName] = useState('');
+
+  // Sprint Management
+  const [showSprintModal, setShowSprintModal] = useState(false);
+  const [editingSprint, setEditingSprint] = useState<Sprint | null>(null);
+
+  // Generic Confirm Modal
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    confirmText?: string;
+    type?: 'danger' | 'info';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  });
+
   // Project data state
   const [tasks, setTasks] = useState<Task[]>([]);
   const [raidItems, setRaidItems] = useState<RAIDItem[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [phases, setPhases] = useState<Phase[]>([]);
+  const [sprints, setSprints] = useState<Sprint[]>([]);
   const [designDocs, setDesignDocs] = useState<DesignDoc[]>([]);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
 
@@ -161,6 +188,10 @@ export default function App() {
       setPhases(snapshot.docs.map(doc => doc.data() as Phase).sort((a, b) => a.order - b.order));
     }, (error) => handleFirestoreError(error, OperationType.GET, `projects/${selectedProjectId}/phases`));
 
+    const sprintsUnsubscribe = onSnapshot(collection(db, 'projects', selectedProjectId, 'sprints'), (snapshot) => {
+      setSprints(snapshot.docs.map(doc => doc.data() as Sprint).sort((a, b) => a.startDate.localeCompare(b.startDate)));
+    }, (error) => handleFirestoreError(error, OperationType.GET, `projects/${selectedProjectId}/sprints`));
+
     const designDocsUnsubscribe = onSnapshot(collection(db, 'projects', selectedProjectId, 'designDocs'), (snapshot) => {
       setDesignDocs(snapshot.docs.map(doc => doc.data() as DesignDoc));
     }, (error) => handleFirestoreError(error, OperationType.GET, `projects/${selectedProjectId}/designDocs`));
@@ -174,6 +205,7 @@ export default function App() {
       raidUnsubscribe();
       milestonesUnsubscribe();
       phasesUnsubscribe();
+      sprintsUnsubscribe();
       designDocsUnsubscribe();
       filesUnsubscribe();
     };
@@ -229,6 +261,20 @@ export default function App() {
       handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}`);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleUpdateMeetingDetails = async (details: Partial<Project>) => {
+    if (!selectedProjectId || !user) return;
+    
+    try {
+      await updateDoc(doc(db, 'projects', selectedProjectId), {
+        ...details,
+        updatedAt: Date.now()
+      });
+    } catch (error) {
+      console.error("Error updating meeting details:", error);
+      handleFirestoreError(error, OperationType.UPDATE, `projects/${selectedProjectId}`);
     }
   };
 
@@ -337,7 +383,7 @@ export default function App() {
     setIsSaving(true);
 
     const projectId = Math.random().toString(36).substr(2, 9);
-    const newProject: Project = {
+    const newProject: any = {
       name: newProjectName || `New ${type === 'RD' ? 'R&D' : 'Delivery'} Project`,
       description: 'Manually created project. Add details here.',
       type,
@@ -346,9 +392,13 @@ export default function App() {
       status: 'ACTIVE',
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      startDate: new Date().toISOString().split('T')[0],
-      ...(type === 'RD' ? { lifecycle, rdCategory } : {})
+      startDate: new Date().toISOString().split('T')[0]
     };
+
+    if (type === 'RD') {
+      if (lifecycle) newProject.lifecycle = lifecycle;
+      if (rdCategory) newProject.rdCategory = rdCategory;
+    }
 
     try {
       await setDoc(doc(db, 'projects', projectId), newProject);
@@ -402,13 +452,25 @@ export default function App() {
     setShowPhaseModal(true);
   };
 
-  const handlePhaseDelete = async (phaseId: string) => {
-    if (!selectedProjectId) return;
-    try {
-      await deleteDoc(doc(db, 'projects', selectedProjectId, 'phases', phaseId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/phases/${phaseId}`);
-    }
+  const handlePhaseDelete = (phaseId: string) => {
+    const phase = phases.find(p => p.id === phaseId);
+    if (!phase) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Phase?',
+      message: `Are you sure you want to delete "${phase.name}"? This action cannot be undone.`,
+      type: 'danger',
+      confirmText: 'Delete Phase',
+      onConfirm: async () => {
+        if (!selectedProjectId) return;
+        try {
+          await deleteDoc(doc(db, 'projects', selectedProjectId, 'phases', phaseId));
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/phases/${phaseId}`);
+        }
+      }
+    });
   };
 
   const handlePhaseSave = async (phaseData: Partial<Phase>) => {
@@ -442,6 +504,105 @@ export default function App() {
     }
   };
 
+  // Sprint Handlers
+  const handleSprintAdd = () => {
+    setEditingSprint(null);
+    setShowSprintModal(true);
+  };
+
+  const handleSprintEdit = (sprint: Sprint) => {
+    setEditingSprint(sprint);
+    setShowSprintModal(true);
+  };
+
+  const handleSprintDelete = (sprintId: string) => {
+    const sprint = sprints.find(s => s.id === sprintId);
+    if (!sprint) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Sprint?',
+      message: `Are you sure you want to delete "${sprint.name}"? This will unassign all tasks from this sprint.`,
+      type: 'danger',
+      confirmText: 'Delete Sprint',
+      onConfirm: async () => {
+        if (!selectedProjectId) return;
+        try {
+          await deleteDoc(doc(db, 'projects', selectedProjectId, 'sprints', sprintId));
+          // Also clear sprintId from tasks
+          const tasksToUpdate = tasks.filter(t => t.sprintId === sprintId);
+          const batch = writeBatch(db);
+          tasksToUpdate.forEach(t => {
+            batch.update(doc(db, 'projects', selectedProjectId, 'tasks', t.id), { sprintId: deleteField() });
+          });
+          await batch.commit();
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/sprints/${sprintId}`);
+        }
+      }
+    });
+  };
+
+  const handleSprintSave = async (sprintData: Partial<Sprint>) => {
+    if (!selectedProjectId || !user) return;
+    setIsSaving(true);
+    try {
+      if (editingSprint) {
+        await updateDoc(doc(db, 'projects', selectedProjectId, 'sprints', editingSprint.id), {
+          ...sprintData,
+        });
+      } else {
+        const sprintId = Math.random().toString(36).substr(2, 9);
+        const newSprint: Sprint = {
+          id: sprintId,
+          projectId: selectedProjectId,
+          name: sprintData.name || `Sprint ${sprints.length + 1}`,
+          startDate: sprintData.startDate || new Date().toISOString().split('T')[0],
+          endDate: sprintData.endDate || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          status: sprintData.status || 'PLANNED',
+          goal: sprintData.goal || ''
+        };
+        await setDoc(doc(db, 'projects', selectedProjectId, 'sprints', sprintId), newSprint);
+      }
+      setShowSprintModal(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `projects/${selectedProjectId}/sprints`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleWBSFileUpload = (taskId: string) => {
+    setTargetTaskIdForFile(taskId);
+    setShowWBSFileUpload(true);
+  };
+
+  const handleWBSFileSave = async (file: File) => {
+    if (!selectedProjectId || !targetTaskIdForFile || !user) return;
+    setIsSaving(true);
+    try {
+      // In a real app, we would upload to Firebase Storage.
+      // For this demo, we'll simulate a URL.
+      const fileId = Math.random().toString(36).substr(2, 9);
+      const newFile: ProjectFile = {
+        id: fileId,
+        projectId: selectedProjectId,
+        docId: targetTaskIdForFile, // Using docId to store the taskId
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        url: URL.createObjectURL(file), // Temporary URL
+        uploadedAt: Date.now()
+      };
+      await setDoc(doc(db, 'projects', selectedProjectId, 'files', fileId), newFile);
+      setShowWBSFileUpload(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `projects/${selectedProjectId}/files`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   // Milestone Handlers
   const handleMilestoneAdd = (phaseName: string) => {
     setEditingMilestone(null);
@@ -455,13 +616,25 @@ export default function App() {
     setShowMilestoneModal(true);
   };
 
-  const handleMilestoneDelete = async (milestoneId: string) => {
-    if (!selectedProjectId) return;
-    try {
-      await deleteDoc(doc(db, 'projects', selectedProjectId, 'milestones', milestoneId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/milestones/${milestoneId}`);
-    }
+  const handleMilestoneDelete = (milestoneId: string) => {
+    const milestone = milestones.find(m => m.id === milestoneId);
+    if (!milestone) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Milestone?',
+      message: `Are you sure you want to delete "${milestone.name}"?`,
+      type: 'danger',
+      confirmText: 'Delete Milestone',
+      onConfirm: async () => {
+        if (!selectedProjectId) return;
+        try {
+          await deleteDoc(doc(db, 'projects', selectedProjectId, 'milestones', milestoneId));
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/milestones/${milestoneId}`);
+        }
+      }
+    });
   };
 
   const handleMilestoneSave = async (milestoneData: Partial<Milestone>) => {
@@ -541,13 +714,25 @@ export default function App() {
     }
   };
 
-  const handleDeleteProjectFile = async (fileId: string) => {
-    if (!selectedProjectId) return;
-    try {
-      await deleteDoc(doc(db, 'projects', selectedProjectId, 'files', fileId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/files/${fileId}`);
-    }
+  const handleDeleteProjectFile = (fileId: string) => {
+    const file = projectFiles.find(f => f.id === fileId);
+    if (!file) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete File?',
+      message: `Are you sure you want to delete "${file.name}"?`,
+      type: 'danger',
+      confirmText: 'Delete File',
+      onConfirm: async () => {
+        if (!selectedProjectId) return;
+        try {
+          await deleteDoc(doc(db, 'projects', selectedProjectId, 'files', fileId));
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/files/${fileId}`);
+        }
+      }
+    });
   };
 
   const handleAdvanceLifecycle = async () => {
@@ -595,19 +780,26 @@ export default function App() {
     }
   };
 
-  const handleAddTask = async (projectId: string, status: Task['status'] = 'BACKLOG') => {
-    if (!user) return;
+  const handleAddTask = async (projectId: string, status: Task['status'] = 'BACKLOG', parentId?: string, phase?: string, workstream?: string) => {
+    if (!user || !projectId) return;
     const taskId = Math.random().toString(36).substr(2, 9);
     const newTask: Task = {
       id: taskId,
       projectId,
-      title: 'New Task',
-      description: 'Click to edit task description',
+      title: parentId ? 'New Sub-activity' : 'New Activity',
+      description: 'Click to edit description',
       status,
-      workstream: 'General',
+      workstream: workstream || 'General',
       owner: user.displayName || 'Unassigned',
       startDate: new Date().toISOString().split('T')[0],
+      phase: phase || '',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
     };
+
+    if (parentId) {
+      newTask.parentId = parentId;
+    }
 
     try {
       await setDoc(doc(db, 'projects', projectId, 'tasks', taskId), newTask);
@@ -616,23 +808,61 @@ export default function App() {
     }
   };
 
-  const handleTaskUpdate = async (taskId: string, updates: Partial<Task>) => {
-    if (!selectedProjectId || !user) return;
+  const handleTaskDelete = (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Activity?',
+      message: `Are you sure you want to delete "${task.title}"? This action cannot be undone.`,
+      type: 'danger',
+      confirmText: 'Delete Activity',
+      onConfirm: async () => {
+        const pId = selectedProjectId || task.projectId;
+        if (!pId || !user) return;
+        try {
+          await deleteDoc(doc(db, 'projects', pId, 'tasks', taskId));
+          if (selectedTaskId === taskId) setSelectedTaskId(null);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `projects/${pId}/tasks/${taskId}`);
+        }
+      }
+    });
+  };
+
+  const handleTaskUpdate = async (taskId: string, updates: any) => {
+    const pId = selectedProjectId || (tasks.find(t => t.id === taskId)?.projectId);
+    if (!pId || !user) return;
+
+    // Sanitize updates to remove undefined values
+    const sanitizedUpdates = Object.entries(updates).reduce((acc, [key, value]) => {
+      if (value !== undefined) acc[key] = value;
+      return acc;
+    }, {} as any);
+
     try {
-      await updateDoc(doc(db, 'projects', selectedProjectId, 'tasks', taskId), {
-        ...updates,
+      await updateDoc(doc(db, 'projects', pId, 'tasks', taskId), {
+        ...sanitizedUpdates,
         updatedAt: Date.now()
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `projects/${selectedProjectId}/tasks/${taskId}`);
+      handleFirestoreError(error, OperationType.UPDATE, `projects/${pId}/tasks/${taskId}`);
     }
   };
 
   const handleRAIDUpdate = async (raidId: string, updates: Partial<RAIDItem>) => {
     if (!selectedProjectId || !user) return;
+
+    // Sanitize updates to remove undefined values
+    const sanitizedUpdates = Object.entries(updates).reduce((acc, [key, value]) => {
+      if (value !== undefined) acc[key] = value;
+      return acc;
+    }, {} as any);
+
     try {
       await updateDoc(doc(db, 'projects', selectedProjectId, 'raidItems', raidId), {
-        ...updates,
+        ...sanitizedUpdates,
         updatedAt: Date.now()
       });
     } catch (error) {
@@ -640,13 +870,25 @@ export default function App() {
     }
   };
 
-  const handleRAIDDelete = async (raidId: string) => {
-    if (!selectedProjectId || !user) return;
-    try {
-      await deleteDoc(doc(db, 'projects', selectedProjectId, 'raidItems', raidId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/raidItems/${raidId}`);
-    }
+  const handleRAIDDelete = (raidId: string) => {
+    const item = raidItems.find(r => r.id === raidId);
+    if (!item) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete RAID Item?',
+      message: `Are you sure you want to delete this ${item.type.toLowerCase()}?`,
+      type: 'danger',
+      confirmText: 'Delete Item',
+      onConfirm: async () => {
+        if (!selectedProjectId || !user) return;
+        try {
+          await deleteDoc(doc(db, 'projects', selectedProjectId, 'raidItems', raidId));
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/raidItems/${raidId}`);
+        }
+      }
+    });
   };
 
   const handleAddRAIDItem = async (type: RAIDItem['type'] = 'RISK') => {
@@ -1333,9 +1575,8 @@ export default function App() {
                     { id: 'TASKS', label: 'Scrum Board', icon: Layers },
                   ] : [
                     { id: 'WBS', label: 'WBS', icon: Layers },
-                    { id: 'ACTIVITY', label: 'Activity Task', icon: CheckCircle2 },
+                    { id: 'ACTIVITY', label: 'Action Point', icon: CheckCircle2 },
                     { id: 'ROADMAP', label: 'Roadmap', icon: Calendar },
-                    { id: 'TIMEPLAN', label: 'Timeplan', icon: Clock },
                   ]),
                   { id: 'RAID', label: 'RAID Log', icon: ShieldAlert },
                   ...(selectedProject?.type === 'RD' ? [
@@ -1575,88 +1816,214 @@ export default function App() {
                 )}
 
                 {activeTab === 'BACKLOG' && selectedProject?.type === 'RD' && (
-                  <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                      <div>
-                        <h3 className="font-bold text-slate-900">Product Backlog</h3>
-                        <p className="text-xs text-slate-500">Prioritize and manage your product backlog items.</p>
+                  <div className="space-y-8">
+                    {/* Sprints Section */}
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Zap className="w-5 h-5 text-amber-500" />
+                          <h3 className="text-lg font-bold text-slate-900">Sprints</h3>
+                        </div>
+                        <button 
+                          onClick={handleSprintAdd}
+                          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Create Sprint
+                        </button>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button 
-                          onClick={() => setShowImportModal(true)}
-                          className="flex items-center gap-2 bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-50 transition-all"
-                        >
-                          <Upload className="w-3.5 h-3.5" />
-                          Import
-                        </button>
-                        <button 
-                          onClick={() => selectedProjectId && handleAddTask(selectedProjectId, 'BACKLOG')}
-                          className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 transition-all"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          Add Item
-                        </button>
+
+                      <div className="grid grid-cols-1 gap-4">
+                        {sprints.length > 0 ? sprints.map(sprint => (
+                          <div key={sprint.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                            <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className={cn(
+                                  "w-2 h-2 rounded-full",
+                                  sprint.status === 'ACTIVE' ? "bg-emerald-500 animate-pulse" : 
+                                  sprint.status === 'COMPLETED' ? "bg-slate-400" : "bg-blue-500"
+                                )} />
+                                <div>
+                                  <h4 className="font-bold text-slate-900 flex items-center gap-2 text-sm">
+                                    {sprint.name}
+                                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-500 uppercase">
+                                      {sprint.status}
+                                    </span>
+                                  </h4>
+                                  <p className="text-[10px] text-slate-500 font-medium">
+                                    {sprint.startDate} — {sprint.endDate}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button 
+                                  onClick={() => handleSprintEdit(sprint)}
+                                  className="p-2 hover:bg-white rounded-lg text-slate-400 transition-colors"
+                                >
+                                  <Settings className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  onClick={() => handleSprintDelete(sprint.id)}
+                                  className="p-2 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 transition-colors"
+                                >
+                                  <Plus className="w-4 h-4 rotate-45" />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="divide-y divide-slate-50">
+                              {tasks.filter(t => t.sprintId === sprint.id).length > 0 ? (
+                                tasks.filter(t => t.sprintId === sprint.id).map(task => (
+                                  <div key={task.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between group cursor-pointer" onClick={() => setSelectedTaskId(task.id)}>
+                                    <div className="flex items-center gap-4 flex-grow">
+                                      <div className={cn(
+                                        "w-8 h-8 rounded flex items-center justify-center",
+                                        task.status === 'DONE' ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-400"
+                                      )}>
+                                        {task.status === 'DONE' ? <CheckCircle2 className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
+                                      </div>
+                                      <div className="flex-grow">
+                                        <p className={cn("text-sm font-semibold text-slate-900", task.status === 'DONE' && "line-through opacity-50")}>{task.title}</p>
+                                        <p className="text-xs text-slate-500 line-clamp-1">{task.description || 'No description'}</p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                      <div className="flex items-center gap-1.5">
+                                        <div className="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center text-[10px] font-bold text-blue-600">
+                                          {task.owner.charAt(0)}
+                                        </div>
+                                        <span className="text-[10px] font-medium text-slate-400">{task.owner}</span>
+                                      </div>
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleTaskUpdate(task.id, { sprintId: deleteField() });
+                                        }}
+                                        className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-[10px] font-bold hover:bg-slate-200 transition-all opacity-0 group-hover:opacity-100"
+                                      >
+                                        Back to Backlog
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="p-8 text-center">
+                                  <p className="text-sm text-slate-400 italic">No tasks assigned to this sprint.</p>
+                                  <p className="text-[10px] text-slate-400 mt-1">Drag tasks here or use the "Move to Sprint" button below.</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )) : (
+                          <div className="p-12 border-2 border-dashed border-slate-200 rounded-2xl text-center">
+                            <Zap className="w-8 h-8 text-slate-300 mx-auto mb-3" />
+                            <p className="text-sm font-medium text-slate-500">No sprints created yet.</p>
+                            <p className="text-xs text-slate-400 mt-1">Start by creating your first sprint to organize your work.</p>
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <div className="divide-y divide-slate-100">
-                      {tasks.filter(t => t.status === 'BACKLOG').length > 0 ? (
-                        tasks.filter(t => t.status === 'BACKLOG').map(task => (
-                          <div key={task.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between group cursor-pointer" onClick={() => setSelectedTaskId(task.id)}>
-                            <div className="flex items-center gap-4 flex-grow">
-                              <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center text-slate-400">
-                                <Layers className="w-4 h-4" />
-                              </div>
-                              <div className="flex-grow space-y-1">
-                                <input
-                                  type="text"
-                                  value={task.title}
-                                  onChange={(e) => handleTaskUpdate(task.id, { title: e.target.value })}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="w-full text-sm font-semibold text-slate-900 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors"
-                                  placeholder="Task title"
-                                />
-                                <textarea
-                                  value={task.description}
-                                  onChange={(e) => handleTaskUpdate(task.id, { description: e.target.value })}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="w-full text-xs text-slate-500 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors resize-none"
-                                  placeholder="Add description..."
-                                  rows={1}
-                                />
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center gap-1.5">
-                                <User className="w-3 h-3 text-slate-400" />
-                                <input
-                                  type="text"
-                                  value={task.owner}
-                                  onChange={(e) => handleTaskUpdate(task.id, { owner: e.target.value })}
-                                  className="text-[10px] font-medium text-slate-400 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors w-24"
-                                  placeholder="Owner"
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                              </div>
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleTaskUpdate(task.id, { status: 'TODO' });
-                                }}
-                                className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-[10px] font-bold hover:bg-blue-600 hover:text-white transition-all opacity-0 group-hover:opacity-100"
-                              >
-                                Move to Sprint
-                              </button>
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="p-12 text-center">
-                          <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
-                            <Layers className="w-6 h-6" />
-                          </div>
-                          <p className="text-sm text-slate-500">Your backlog is empty. Start adding items to plan your project.</p>
+
+                    {/* Backlog Section */}
+                    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                      <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                        <div>
+                          <h3 className="font-bold text-slate-900">Product Backlog</h3>
+                          <p className="text-xs text-slate-500">Unassigned items waiting to be planned into sprints.</p>
                         </div>
-                      )}
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => setShowImportModal(true)}
+                            className="flex items-center gap-2 bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-50 transition-all"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            Import
+                          </button>
+                          <button 
+                            onClick={() => selectedProjectId && handleAddTask(selectedProjectId, 'BACKLOG')}
+                            className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 transition-all"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Add Item
+                          </button>
+                        </div>
+                      </div>
+                      <div className="divide-y divide-slate-100">
+                        {tasks.filter(t => !t.sprintId).length > 0 ? (
+                          tasks.filter(t => !t.sprintId).map(task => (
+                            <div key={task.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between group cursor-pointer" onClick={() => setSelectedTaskId(task.id)}>
+                              <div className="flex items-center gap-4 flex-grow">
+                                <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center text-slate-400">
+                                  <Layers className="w-4 h-4" />
+                                </div>
+                                <div className="flex-grow space-y-1">
+                                  <input
+                                    type="text"
+                                    value={task.title}
+                                    onChange={(e) => handleTaskUpdate(task.id, { title: e.target.value })}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="w-full text-sm font-semibold text-slate-900 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors"
+                                    placeholder="Task title"
+                                  />
+                                  <textarea
+                                    value={task.description}
+                                    onChange={(e) => handleTaskUpdate(task.id, { description: e.target.value })}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="w-full text-xs text-slate-500 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors resize-none"
+                                    placeholder="Add description..."
+                                    rows={1}
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-1.5">
+                                  <User className="w-3 h-3 text-slate-400" />
+                                  <input
+                                    type="text"
+                                    value={task.owner}
+                                    onChange={(e) => handleTaskUpdate(task.id, { owner: e.target.value })}
+                                    className="text-[10px] font-medium text-slate-400 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors w-24"
+                                    placeholder="Owner"
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                </div>
+                                {sprints.length > 0 && (
+                                  <div className="relative group/menu">
+                                    <button 
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-[10px] font-bold hover:bg-blue-600 hover:text-white transition-all opacity-0 group-hover:opacity-100"
+                                    >
+                                      Move to Sprint
+                                    </button>
+                                    <div className="absolute right-0 bottom-full mb-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 py-2 hidden group-hover/menu:block z-20">
+                                      <p className="px-4 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Select Sprint</p>
+                                      {sprints.filter(s => s.status !== 'COMPLETED').map(s => (
+                                        <button
+                                          key={s.id}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleTaskUpdate(task.id, { sprintId: s.id, status: 'TODO' });
+                                          }}
+                                          className="w-full text-left px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 transition-colors flex items-center justify-between"
+                                        >
+                                          {s.name}
+                                          {s.status === 'ACTIVE' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="p-12 text-center">
+                            <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
+                              <Layers className="w-6 h-6" />
+                            </div>
+                            <p className="text-sm text-slate-500">Your backlog is empty. Start adding items to plan your project.</p>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1676,94 +2043,151 @@ export default function App() {
                       <div className="flex items-center justify-between mb-6">
                         <div>
                           <h3 className="text-lg font-bold text-slate-900">Work Breakdown Structure (WBS)</h3>
-                          <p className="text-xs text-slate-500">Hierarchical decomposition of the total scope of work.</p>
+                          <p className="text-xs text-slate-500">Hierarchical decomposition of project deliverables by Workstream.</p>
                         </div>
-                        <button 
-                          onClick={() => selectedProjectId && handleAddTask(selectedProjectId, 'TODO')}
-                          className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 transition-all"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          Add Activity
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => setShowWorkstreamModal(true)}
+                            className="flex items-center gap-2 bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-50 transition-all"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Add Workstream
+                          </button>
+                        </div>
                       </div>
-                      <WaterfallView tasks={tasks} onTaskClick={(taskId) => setSelectedTaskId(taskId)} />
+                      <WBSView 
+                        tasks={tasks} 
+                        projectFiles={projectFiles}
+                        projectId={selectedProjectId || ''}
+                        onTaskUpdate={handleTaskUpdate}
+                        onAddTask={handleAddTask}
+                        onTaskDelete={handleTaskDelete}
+                        onTaskClick={(taskId) => setSelectedTaskId(taskId)}
+                        onFileUpload={handleWBSFileUpload}
+                      />
                     </div>
                   </div>
                 )}
 
                 {activeTab === 'ACTIVITY' && selectedProject?.type === 'DELIVERY' && (
                   <div className="space-y-6">
+                    {/* Meeting Summary Section */}
                     <div className="bg-white border border-slate-200 rounded-2xl p-6">
                       <div className="flex items-center justify-between mb-6">
                         <div>
-                          <h3 className="text-lg font-bold text-slate-900">Activity Tasks</h3>
-                          <p className="text-xs text-slate-500">Detailed list of all project activities and their status.</p>
+                          <h3 className="text-lg font-bold text-slate-900">Meeting Minutes</h3>
+                          <p className="text-xs text-slate-500">Capture the details of the latest project meeting.</p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="relative">
-                            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                            <input type="text" placeholder="Filter activities..." className="pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 w-48" />
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="space-y-4">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Meeting Date</label>
+                            <input 
+                              type="date" 
+                              value={selectedProject?.meetingDate || ''} 
+                              onChange={(e) => handleUpdateMeetingDetails({ meetingDate: e.target.value })}
+                              className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Meeting Owner</label>
+                            <input 
+                              type="text" 
+                              value={selectedProject?.meetingOwner || ''} 
+                              onChange={(e) => handleUpdateMeetingDetails({ meetingOwner: e.target.value })}
+                              placeholder="Who led the meeting?"
+                              className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </div>
+                        </div>
+                        <div className="md:col-span-2 space-y-4">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Attendance</label>
+                            <textarea 
+                              value={selectedProject?.meetingAttendance || ''} 
+                              onChange={(e) => handleUpdateMeetingDetails({ meetingAttendance: e.target.value })}
+                              placeholder="List of attendees..."
+                              className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500/20 min-h-[100px]"
+                            />
                           </div>
                         </div>
                       </div>
-                      <div className="grid grid-cols-1 gap-3">
-                        {tasks.map(task => (
-                          <div key={task.id} className="flex items-center justify-between p-4 bg-white border border-slate-100 rounded-xl hover:border-blue-200 hover:shadow-sm transition-all cursor-pointer group" onClick={() => setSelectedTaskId(task.id)}>
-                            <div className="flex items-center gap-4">
-                              <div className={cn(
-                                "w-10 h-10 rounded-xl flex items-center justify-center transition-colors",
-                                task.status === 'DONE' ? "bg-emerald-50 text-emerald-600" : 
-                                task.status === 'IN_PROGRESS' ? "bg-blue-50 text-blue-600" : "bg-slate-50 text-slate-400"
-                              )}>
-                                {task.status === 'DONE' ? <CheckCircle2 className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-2 mb-0.5">
-                                  <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">{task.workstream}</span>
-                                  <span className="text-[10px] text-slate-300">•</span>
-                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{task.phase}</span>
-                                </div>
-                                <h4 className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{task.title}</h4>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-8">
-                              <div className="text-right">
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Owner</p>
-                                <p className="text-xs font-bold text-slate-700">{task.owner}</p>
-                              </div>
-                              <div className="text-right w-24">
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">End Date</p>
-                                <p className="text-xs font-bold text-slate-700">{task.endDate || 'TBD'}</p>
-                              </div>
-                              <div className={cn(
-                                "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider",
-                                task.status === 'DONE' ? "bg-emerald-100 text-emerald-700" : 
-                                task.status === 'IN_PROGRESS' ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-600"
-                              )}>
-                                {task.status.replace('_', ' ')}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
+                      <div className="mt-6">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Action Points Summary</label>
+                        <textarea 
+                          value={selectedProject?.meetingSummary || ''} 
+                          onChange={(e) => handleUpdateMeetingDetails({ meetingSummary: e.target.value })}
+                          placeholder="Summary of key action points discussed..."
+                          className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500/20 min-h-[120px]"
+                        />
                       </div>
                     </div>
-                  </div>
-                )}
 
-                {activeTab === 'TIMEPLAN' && selectedProject?.type === 'DELIVERY' && (
-                  <div className="space-y-6">
-                    <Roadmap 
-                      tasks={tasks} 
-                      milestones={milestones} 
-                      phases={phases}
-                      onTaskClick={(taskId) => setSelectedTaskId(taskId)}
-                      onPhaseAdd={handlePhaseAdd}
-                      onPhaseEdit={handlePhaseEdit}
-                      onPhaseDelete={handlePhaseDelete}
-                      onMilestoneAdd={handleMilestoneAdd}
-                      onMilestoneEdit={handleMilestoneEdit}
-                      onMilestoneDelete={handleMilestoneDelete}
-                    />
+                    {/* Action Points Table */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                      <div className="flex items-center justify-between mb-6">
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-900">Action Points Tracking</h3>
+                          <p className="text-xs text-slate-500">Detailed tracking of all action items.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => handleAddTask(selectedProjectId!, 'TODO')}
+                            className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 transition-all"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Add Action Point
+                          </button>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-slate-100">
+                              <th className="pb-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
+                              <th className="pb-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Action Point</th>
+                              <th className="pb-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Workstream</th>
+                              <th className="pb-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Owner</th>
+                              <th className="pb-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Due Date</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {tasks.map(task => (
+                              <tr 
+                                key={task.id} 
+                                className="hover:bg-slate-50/50 cursor-pointer transition-colors group"
+                                onClick={() => setSelectedTaskId(task.id)}
+                              >
+                                <td className="py-4">
+                                  <div className={cn(
+                                    "w-8 h-8 rounded-lg flex items-center justify-center",
+                                    task.status === 'DONE' ? "bg-emerald-50 text-emerald-600" : 
+                                    task.status === 'IN_PROGRESS' ? "bg-blue-50 text-blue-600" : "bg-slate-50 text-slate-400"
+                                  )}>
+                                    {task.status === 'DONE' ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+                                  </div>
+                                </td>
+                                <td className="py-4">
+                                  <p className="text-sm font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{task.title}</p>
+                                </td>
+                                <td className="py-4">
+                                  <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md uppercase tracking-wider">
+                                    {task.workstream}
+                                  </span>
+                                </td>
+                                <td className="py-4">
+                                  <p className="text-xs font-bold text-slate-700">{task.owner}</p>
+                                </td>
+                                <td className="py-4">
+                                  <p className="text-xs font-bold text-slate-700">{task.endDate || 'TBD'}</p>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -2090,6 +2514,7 @@ export default function App() {
       {selectedTaskId && tasks.find(t => t.id === selectedTaskId) && (
         <TaskModal
           task={tasks.find(t => t.id === selectedTaskId)!}
+          allTasks={tasks}
           isOpen={!!selectedTaskId}
           onClose={() => setSelectedTaskId(null)}
           onUpdate={handleTaskUpdate}
@@ -2203,6 +2628,191 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+      {/* WBS File Upload Modal */}
+      {showWBSFileUpload && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <h3 className="text-lg font-bold text-slate-900">Upload File</h3>
+              <button onClick={() => setShowWBSFileUpload(false)} className="p-2 hover:bg-white rounded-xl text-slate-400 transition-colors"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-slate-500">Attach a file (Excel, Word, PDF) to this activity.</p>
+              <div className="border-2 border-dashed border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:border-blue-400 hover:bg-slate-50 transition-all cursor-pointer relative">
+                <input 
+                  type="file" 
+                  className="absolute inset-0 opacity-0 cursor-pointer" 
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleWBSFileSave(file);
+                  }}
+                  accept=".pdf,.doc,.docx,.xls,.xlsx"
+                />
+                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mb-3">
+                  <Upload className="w-6 h-6 text-blue-600" />
+                </div>
+                <p className="text-sm font-bold text-slate-900">Click to upload</p>
+                <p className="text-xs text-slate-400 mt-1">PDF, Word, or Excel files</p>
+              </div>
+              <div className="pt-4">
+                <button 
+                  onClick={() => setShowWBSFileUpload(false)} 
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Sprint Modal */}
+      {showSprintModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <h3 className="text-lg font-bold text-slate-900">{editingSprint ? 'Edit Sprint' : 'Create Sprint'}</h3>
+              <button onClick={() => setShowSprintModal(false)} className="p-2 hover:bg-white rounded-xl text-slate-400 transition-colors"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.currentTarget);
+              handleSprintSave({
+                name: formData.get('name') as string,
+                startDate: formData.get('startDate') as string,
+                endDate: formData.get('endDate') as string,
+                status: formData.get('status') as Sprint['status'],
+                goal: formData.get('goal') as string
+              });
+            }} className="p-6 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Sprint Name</label>
+                <input name="name" defaultValue={editingSprint?.name} required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="e.g. Sprint 1" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Start Date</label>
+                  <input type="date" name="startDate" defaultValue={editingSprint?.startDate || new Date().toISOString().split('T')[0]} required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">End Date</label>
+                  <input type="date" name="endDate" defaultValue={editingSprint?.endDate || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]} required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Status</label>
+                <select name="status" defaultValue={editingSprint?.status || 'PLANNED'} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none">
+                  <option value="PLANNED">Planned</option>
+                  <option value="ACTIVE">Active</option>
+                  <option value="COMPLETED">Completed</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Sprint Goal</label>
+                <textarea name="goal" defaultValue={editingSprint?.goal} rows={3} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none resize-none" placeholder="What do we want to achieve?" />
+              </div>
+              <div className="pt-4 flex gap-3">
+                <button type="button" onClick={() => setShowSprintModal(false)} className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+                <button type="submit" disabled={isSaving} className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingSprint ? 'Update Sprint' : 'Create Sprint')}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Workstream Modal */}
+      {showWorkstreamModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <h3 className="text-lg font-bold text-slate-900">Add Workstream</h3>
+              <button onClick={() => setShowWorkstreamModal(false)} className="p-2 hover:bg-white rounded-xl text-slate-400 transition-colors"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (newWorkstreamName.trim() && selectedProjectId) {
+                handleAddTask(selectedProjectId, 'TODO', undefined, '', newWorkstreamName.trim());
+                setNewWorkstreamName('');
+                setShowWorkstreamModal(false);
+              }
+            }} className="p-6 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Workstream Name</label>
+                <input 
+                  value={newWorkstreamName}
+                  onChange={(e) => setNewWorkstreamName(e.target.value)}
+                  required 
+                  autoFocus
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" 
+                  placeholder="e.g. Design, Development, Marketing" 
+                />
+              </div>
+              <div className="pt-4 flex gap-3">
+                <button type="button" onClick={() => setShowWorkstreamModal(false)} className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+                <button type="submit" className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors">
+                  Add Workstream
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Generic Confirm Modal */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8"
+          >
+            <div className={cn(
+              "w-16 h-16 rounded-full flex items-center justify-center mb-6 mx-auto",
+              confirmModal.type === 'danger' ? "bg-red-100" : "bg-blue-100"
+            )}>
+              {confirmModal.type === 'danger' ? (
+                <Trash2 className="w-8 h-8 text-red-600" />
+              ) : (
+                <AlertCircle className="w-8 h-8 text-blue-600" />
+              )}
+            </div>
+            <h3 className="text-xl font-bold text-slate-900 text-center mb-2">{confirmModal.title}</h3>
+            <p className="text-slate-500 text-center mb-8">{confirmModal.message}</p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))} 
+                className="flex-1 px-4 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={confirmModal.onConfirm} 
+                className={cn(
+                  "flex-1 px-4 py-3 text-white rounded-xl font-bold transition-colors",
+                  confirmModal.type === 'danger' ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"
+                )}
+              >
+                {confirmModal.confirmText || 'Confirm'}
+              </button>
+            </div>
           </motion.div>
         </div>
       )}
