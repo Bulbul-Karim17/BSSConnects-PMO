@@ -21,7 +21,10 @@
         "meetingAttendance": { "type": "string" },
         "meetingDate": { "type": "string" },
         "meetingOwner": { "type": "string" },
-        "meetingSummary": { "type": "string" }
+        "meetingSummary": { "type": "string" },
+        "requirementData": { "type": "string" },
+        "scopeOfWork": { "type": "string" },
+        "useCases": { "type": "string" }
       },
       "required": ["id", "name", "type", "status", "createdAt", "updatedAt", "ownerId"]
     },
@@ -140,6 +143,25 @@
         "uploadedAt": { "type": "number" }
       },
       "required": ["id", "projectId", "docId", "name", "type", "size", "url", "uploadedAt"]
+    },
+    "Resource": {
+      "title": "Resource",
+      "description": "Human resources available for projects.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "email": { "type": "string" },
+        "department": { "type": "string" },
+        "skills": { "type": "array", "items": { "type": "string" } },
+        "availability": { "type": "number" },
+        "projectIds": { "type": "array", "items": { "type": "string" } },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "name", "role", "ownerId", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -174,6 +196,10 @@
     "/projects/{projectId}/files/{fileId}": {
       "schema": "ProjectFile",
       "description": "Files uploaded to a project."
+    },
+    "/resources/{resourceId}": {
+      "schema": "Resource",
+      "description": "Collection of human resources."
     }
   }
 }

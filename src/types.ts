@@ -20,6 +20,9 @@ export interface Project {
   meetingDate?: string;
   meetingOwner?: string;
   meetingSummary?: string;
+  requirementData?: string;
+  scopeOfWork?: string;
+  useCases?: string;
 }
 
 export interface Task {
@@ -105,4 +108,18 @@ export interface ProjectFile {
   size: number;
   url: string;
   uploadedAt: number;
+}
+
+export interface Resource {
+  id: string;
+  name: string;
+  role: string;
+  email: string;
+  department: string;
+  skills: string[];
+  availability: number; // 0-100%
+  projectIds: string[]; // Linked projects
+  ownerId: string; // The user who created this resource
+  createdAt: number;
+  updatedAt: number;
 }

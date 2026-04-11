@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { RAIDItem } from '../types';
+import { RAIDItem, Resource } from '../types';
 import { 
   AlertTriangle, 
   HelpCircle, 
@@ -18,6 +18,7 @@ import { cn } from '../lib/utils';
 
 interface RAIDLogProps {
   items: RAIDItem[];
+  resources: Resource[];
   onUpdate?: (id: string, updates: Partial<RAIDItem>) => void;
   onDelete?: (id: string) => void;
   onAdd?: (type: RAIDItem['type']) => void;
@@ -30,7 +31,7 @@ const TYPE_CONFIG = {
   ISSUE: { icon: AlertCircle, color: 'text-red-600 bg-red-50', border: 'border-red-100', label: 'Issues' },
 };
 
-export const RAIDLog: React.FC<RAIDLogProps> = ({ items, onUpdate, onDelete, onAdd }) => {
+export const RAIDLog: React.FC<RAIDLogProps> = ({ items, resources, onUpdate, onDelete, onAdd }) => {
   const [activeType, setActiveType] = useState<RAIDItem['type'] | 'ALL'>('ALL');
 
   const filteredItems = activeType === 'ALL' 
@@ -176,13 +177,18 @@ export const RAIDLog: React.FC<RAIDLogProps> = ({ items, onUpdate, onDelete, onA
                           <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center text-[8px] font-bold">
                             {item.owner.charAt(0)}
                           </div>
-                          <input
-                            type="text"
+                          <select
                             value={item.owner}
                             onChange={(e) => onUpdate?.(item.id, { owner: e.target.value })}
-                            className="bg-transparent border-none focus:ring-0 p-0 text-xs font-medium text-slate-600 w-24 focus:bg-slate-50 rounded"
-                            placeholder="Owner"
-                          />
+                            className="bg-transparent border-none focus:ring-0 p-0 text-xs font-medium text-slate-600 w-24 focus:bg-slate-50 rounded cursor-pointer appearance-none"
+                          >
+                            <option value="Unassigned">Unassigned</option>
+                            {resources.map(resource => (
+                              <option key={resource.id} value={resource.name}>
+                                {resource.name}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                         <select
                           value={item.status}

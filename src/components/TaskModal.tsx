@@ -1,5 +1,5 @@
 import React from 'react';
-import { Task } from '../types';
+import { Task, Resource } from '../types';
 import { X, User, Calendar, Flag, CheckCircle2, Layout, Target, ListChecks, FileText, Link as LinkIcon, Plus, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -7,12 +7,13 @@ import { cn } from '../lib/utils';
 interface TaskModalProps {
   task: Task;
   allTasks: Task[];
+  resources: Resource[];
   isOpen: boolean;
   onClose: () => void;
   onUpdate: (taskId: string, updates: Partial<Task>) => void;
 }
 
-export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, isOpen, onClose, onUpdate }) => {
+export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, resources, isOpen, onClose, onUpdate }) => {
   if (!isOpen) return null;
 
   const otherTasks = allTasks.filter(t => t.id !== task.id);
@@ -82,13 +83,18 @@ export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, isOpen, on
                   <User className="w-3 h-3" />
                   Owner
                 </label>
-                <input
-                  type="text"
+                <select
                   value={task.owner}
                   onChange={(e) => onUpdate(task.id, { owner: e.target.value })}
-                  className="w-full text-sm font-medium text-slate-700 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-blue-500/20 p-3 transition-all"
-                  placeholder="Assignee name"
-                />
+                  className="w-full text-sm font-medium text-slate-700 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-blue-500/20 p-3 transition-all appearance-none cursor-pointer"
+                >
+                  <option value="Unassigned">Unassigned</option>
+                  {resources.map(resource => (
+                    <option key={resource.id} value={resource.name}>
+                      {resource.name} ({resource.role})
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">

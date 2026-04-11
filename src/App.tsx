@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Project, Task, RAIDItem, Milestone, RDPhase, Phase, DesignDoc, ProjectFile, Sprint } from './types';
+import { Project, Task, RAIDItem, Milestone, RDPhase, Phase, DesignDoc, ProjectFile, Sprint, Resource } from './types';
 import { ProjectCard } from './components/ProjectCard';
 import { FileUpload } from './components/FileUpload';
 import { AgileBoard } from './components/AgileBoard';
@@ -38,6 +38,12 @@ import {
   Check,
   X,
   FileText,
+  Paperclip,
+  File,
+  BookOpen,
+  Target,
+  ListChecks,
+  ChevronDown,
   Layout,
   Flame,
   Snowflake
@@ -61,7 +67,7 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [mainView, setMainView] = useState<'DASHBOARD' | 'PROJECTS' | 'CALENDAR' | 'REPORTS' | 'RESOURCES'>('DASHBOARD');
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'DATA_STORY'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'DATA_STORY' | 'LIBRARY'>('OVERVIEW');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [selectedTypeForCreation, setSelectedTypeForCreation] = useState<'RD' | 'DELIVERY' | null>(null);
@@ -117,6 +123,9 @@ export default function App() {
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [designDocs, setDesignDocs] = useState<DesignDoc[]>([]);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [showResourceModal, setShowResourceModal] = useState(false);
+  const [editingResource, setEditingResource] = useState<Resource | null>(null);
 
   // Auth Listener
   useEffect(() => {
@@ -155,6 +164,21 @@ export default function App() {
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'projects');
     });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Resources Listener
+  useEffect(() => {
+    if (!user) {
+      setResources([]);
+      return;
+    }
+
+    const q = query(collection(db, 'resources'), where('ownerId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setResources(snapshot.docs.map(doc => doc.data() as Resource));
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'resources'));
 
     return () => unsubscribe();
   }, [user]);
@@ -264,7 +288,7 @@ export default function App() {
     }
   };
 
-  const handleUpdateMeetingDetails = async (details: Partial<Project>) => {
+  const handleUpdateProjectDetails = async (details: Partial<Project>) => {
     if (!selectedProjectId || !user) return;
     
     try {
@@ -273,9 +297,63 @@ export default function App() {
         updatedAt: Date.now()
       });
     } catch (error) {
-      console.error("Error updating meeting details:", error);
+      console.error("Error updating project details:", error);
       handleFirestoreError(error, OperationType.UPDATE, `projects/${selectedProjectId}`);
     }
+  };
+
+  const handleResourceSave = async (resourceData: Partial<Resource>) => {
+    if (!user) return;
+    setIsSaving(true);
+    try {
+      if (editingResource) {
+        await updateDoc(doc(db, 'resources', editingResource.id), {
+          ...resourceData,
+          updatedAt: Date.now()
+        });
+      } else {
+        const resourceId = Math.random().toString(36).substr(2, 9);
+        const newResource: Resource = {
+          id: resourceId,
+          name: resourceData.name || 'New Resource',
+          role: resourceData.role || 'Team Member',
+          email: resourceData.email || '',
+          department: resourceData.department || '',
+          skills: resourceData.skills || [],
+          availability: resourceData.availability || 100,
+          projectIds: resourceData.projectIds || [],
+          ownerId: user.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        };
+        await setDoc(doc(db, 'resources', resourceId), newResource);
+      }
+      setShowResourceModal(false);
+      setEditingResource(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'resources');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleResourceDelete = async (resourceId: string) => {
+    if (!user) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Resource?',
+      message: 'Are you sure you want to delete this resource? This action cannot be undone.',
+      type: 'danger',
+      confirmText: 'Delete',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'resources', resourceId));
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `resources/${resourceId}`);
+        }
+      }
+    });
   };
 
   const handleFileAnalyzed = async (data: any, existingProjectId?: string) => {
@@ -681,7 +759,7 @@ export default function App() {
     }
   };
 
-  const handleUploadProjectFile = async (docId: 'hld' | 'lld', file: File) => {
+  const handleUploadProjectFile = async (docId: string, file: File) => {
     if (!selectedProjectId || !user) return;
     
     // Simulate upload by getting a data URL if small, or just a placeholder
@@ -1512,33 +1590,96 @@ export default function App() {
 
               {mainView === 'RESOURCES' && (
                 <div className="space-y-8">
-                  {tasks.length > 0 ? (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-2xl font-bold text-slate-900">Resource Management</h2>
+                      <p className="text-slate-500">Manage your team members and their project assignments.</p>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setEditingResource(null);
+                        setShowResourceModal(true);
+                      }}
+                      className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add Resource
+                    </button>
+                  </div>
+
+                  {resources.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {Array.from(new Set(tasks.map(t => t.owner))).map((owner, idx) => (
-                        <div key={idx} className="bg-white border border-slate-200 rounded-2xl p-6 hover:border-blue-300 transition-all group">
+                      {resources.map((resource) => (
+                        <div key={resource.id} className="bg-white border border-slate-200 rounded-2xl p-6 hover:border-blue-300 transition-all group relative">
+                          <div className="absolute top-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                              onClick={() => {
+                                setEditingResource(resource);
+                                setShowResourceModal(true);
+                              }}
+                              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button 
+                              onClick={() => handleResourceDelete(resource.id)}
+                              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-600"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
                           <div className="flex items-center gap-4 mb-6">
                             <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500 font-bold text-lg group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
-                              {owner.charAt(0)}
+                              {resource.name.charAt(0)}
                             </div>
                             <div>
-                              <h3 className="font-bold text-slate-900">{owner}</h3>
-                              <p className="text-xs text-slate-500">Team Member</p>
+                              <h3 className="font-bold text-slate-900">{resource.name}</h3>
+                              <p className="text-xs text-slate-500">{resource.role}</p>
                             </div>
                           </div>
-                          <div className="space-y-3">
+
+                          <div className="space-y-4">
                             <div className="flex justify-between items-center text-xs">
-                              <span className="text-slate-500 font-medium">Active Tasks</span>
-                              <span className="font-bold text-slate-900">{tasks.filter(t => t.owner === owner).length}</span>
+                              <span className="text-slate-500 font-medium">Department</span>
+                              <span className="font-bold text-slate-700">{resource.department || 'N/A'}</span>
                             </div>
                             <div className="flex justify-between items-center text-xs">
-                              <span className="text-slate-500 font-medium">Workload</span>
-                              <span className="font-bold text-emerald-600">Optimal</span>
+                              <span className="text-slate-500 font-medium">Availability</span>
+                              <span className={cn(
+                                "font-bold",
+                                resource.availability > 70 ? "text-emerald-600" : 
+                                resource.availability > 30 ? "text-amber-600" : "text-red-600"
+                              )}>{resource.availability}%</span>
                             </div>
+                            
+                            <div>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Skills</p>
+                              <div className="flex flex-wrap gap-1">
+                                {resource.skills?.length > 0 ? resource.skills.map((skill, sIdx) => (
+                                  <span key={sIdx} className="px-2 py-0.5 bg-slate-50 text-slate-600 rounded text-[10px] font-medium">
+                                    {skill}
+                                  </span>
+                                )) : <span className="text-[10px] text-slate-400 italic">No skills listed</span>}
+                              </div>
+                            </div>
+
                             <div className="pt-4 border-t border-slate-50">
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Current Focus</p>
-                              <p className="text-xs text-slate-700 truncate font-medium">
-                                {tasks.find(t => t.owner === owner)?.title || 'No active tasks'}
-                              </p>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Assigned Projects</p>
+                              <div className="space-y-1">
+                                {resource.projectIds?.length > 0 ? resource.projectIds.map(pid => {
+                                  const p = projects.find(proj => proj.id === pid);
+                                  return (
+                                    <div key={pid} className="flex items-center gap-2 text-xs text-slate-700">
+                                      <div className={cn(
+                                        "w-1.5 h-1.5 rounded-full",
+                                        p?.type === 'RD' ? "bg-purple-500" : "bg-blue-500"
+                                      )} />
+                                      <span className="truncate font-medium">{p?.name || 'Unknown Project'}</span>
+                                    </div>
+                                  );
+                                }) : <p className="text-[10px] text-slate-400 italic">No projects assigned</p>}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1550,9 +1691,19 @@ export default function App() {
                         <Users className="w-8 h-8 text-slate-300" />
                       </div>
                       <h3 className="text-lg font-bold text-slate-900 mb-2">No Resources Found</h3>
-                      <p className="text-slate-500 max-w-xs mx-auto">
-                        Once you add tasks to your projects and assign owners, they will appear here for workload management.
+                      <p className="text-slate-500 max-w-xs mx-auto mb-6">
+                        Start by adding your team members and assigning them to projects.
                       </p>
+                      <button 
+                        onClick={() => {
+                          setEditingResource(null);
+                          setShowResourceModal(true);
+                        }}
+                        className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add Your First Resource
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1577,6 +1728,7 @@ export default function App() {
                     { id: 'WBS', label: 'WBS', icon: Layers },
                     { id: 'ACTIVITY', label: 'Action Point', icon: CheckCircle2 },
                     { id: 'ROADMAP', label: 'Roadmap', icon: Calendar },
+                    { id: 'LIBRARY', label: 'Library Data', icon: BookOpen },
                   ]),
                   { id: 'RAID', label: 'RAID Log', icon: ShieldAlert },
                   ...(selectedProject?.type === 'RD' ? [
@@ -2031,6 +2183,7 @@ export default function App() {
                 {activeTab === 'TASKS' && selectedProject?.type === 'RD' && (
                   <AgileBoard 
                     tasks={tasks} 
+                    resources={resources}
                     onTaskUpdate={handleTaskUpdate} 
                     onAddTask={(status) => selectedProjectId && handleAddTask(selectedProjectId, status)} 
                     onTaskClick={(taskId) => setSelectedTaskId(taskId)}
@@ -2086,19 +2239,22 @@ export default function App() {
                             <input 
                               type="date" 
                               value={selectedProject?.meetingDate || ''} 
-                              onChange={(e) => handleUpdateMeetingDetails({ meetingDate: e.target.value })}
+                              onChange={(e) => handleUpdateProjectDetails({ meetingDate: e.target.value })}
                               className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500/20"
                             />
                           </div>
                           <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Meeting Owner</label>
-                            <input 
-                              type="text" 
+                            <select 
                               value={selectedProject?.meetingOwner || ''} 
-                              onChange={(e) => handleUpdateMeetingDetails({ meetingOwner: e.target.value })}
-                              placeholder="Who led the meeting?"
-                              className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500/20"
-                            />
+                              onChange={(e) => handleUpdateProjectDetails({ meetingOwner: e.target.value })}
+                              className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+                            >
+                              <option value="">Select Owner...</option>
+                              {resources.map(r => (
+                                <option key={r.id} value={r.name}>{r.name}</option>
+                              ))}
+                            </select>
                           </div>
                         </div>
                         <div className="md:col-span-2 space-y-4">
@@ -2106,7 +2262,7 @@ export default function App() {
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Attendance</label>
                             <textarea 
                               value={selectedProject?.meetingAttendance || ''} 
-                              onChange={(e) => handleUpdateMeetingDetails({ meetingAttendance: e.target.value })}
+                              onChange={(e) => handleUpdateProjectDetails({ meetingAttendance: e.target.value })}
                               placeholder="List of attendees..."
                               className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500/20 min-h-[100px]"
                             />
@@ -2117,7 +2273,7 @@ export default function App() {
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Action Points Summary</label>
                         <textarea 
                           value={selectedProject?.meetingSummary || ''} 
-                          onChange={(e) => handleUpdateMeetingDetails({ meetingSummary: e.target.value })}
+                          onChange={(e) => handleUpdateProjectDetails({ meetingSummary: e.target.value })}
                           placeholder="Summary of key action points discussed..."
                           className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500/20 min-h-[120px]"
                         />
@@ -2177,7 +2333,20 @@ export default function App() {
                                   </span>
                                 </td>
                                 <td className="py-4">
-                                  <p className="text-xs font-bold text-slate-700">{task.owner}</p>
+                                  <select
+                                    value={task.owner}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      handleTaskUpdate(task.id, { owner: e.target.value });
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="text-xs font-bold text-slate-700 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                                  >
+                                    <option value="Unassigned">Unassigned</option>
+                                    {resources.map(r => (
+                                      <option key={r.id} value={r.name}>{r.name}</option>
+                                    ))}
+                                  </select>
                                 </td>
                                 <td className="py-4">
                                   <p className="text-xs font-bold text-slate-700">{task.endDate || 'TBD'}</p>
@@ -2191,9 +2360,163 @@ export default function App() {
                   </div>
                 )}
 
+                {activeTab === 'LIBRARY' && selectedProject?.type === 'DELIVERY' && (
+                  <div className="space-y-8">
+                    <div className="bg-white border border-slate-200 rounded-2xl p-8">
+                      <div className="flex items-center gap-3 mb-6">
+                        <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center">
+                          <BookOpen className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div>
+                          <h3 className="text-xl font-bold text-slate-900">Library Data</h3>
+                          <p className="text-sm text-slate-500">Core project documentation and requirements.</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-8">
+                        {/* Requirement Data */}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                              <FileText className="w-3 h-3" />
+                              Requirement Data
+                            </label>
+                            <label className="cursor-pointer group flex items-center gap-1.5 text-[10px] font-bold text-blue-600 hover:text-blue-700 transition-colors">
+                              <Paperclip className="w-3 h-3" />
+                              Attach File
+                              <input 
+                                type="file" 
+                                className="hidden" 
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) handleUploadProjectFile('requirementData', file);
+                                }}
+                                accept=".pdf,.docx,.xlsx"
+                              />
+                            </label>
+                          </div>
+                          <textarea
+                            value={selectedProject?.requirementData || ''}
+                            onChange={(e) => handleUpdateProjectDetails({ requirementData: e.target.value })}
+                            className="w-full text-sm text-slate-600 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500/20 p-4 transition-all min-h-[120px] leading-relaxed"
+                            placeholder="Detail the project requirements here..."
+                          />
+                          {projectFiles.filter(f => f.docId === 'requirementData').length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {projectFiles.filter(f => f.docId === 'requirementData').map(file => (
+                                <div key={file.id} className="flex items-center gap-2 bg-white border border-slate-100 px-3 py-1.5 rounded-lg shadow-sm group">
+                                  <File className="w-3 h-3 text-blue-500" />
+                                  <span className="text-[10px] font-medium text-slate-600 truncate max-w-[200px]">{file.name}</span>
+                                  <button 
+                                    onClick={() => handleDeleteProjectFile(file.id)}
+                                    className="p-1 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded transition-colors"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Scope of Work */}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                              <Target className="w-3 h-3" />
+                              Scope of Work
+                            </label>
+                            <label className="cursor-pointer group flex items-center gap-1.5 text-[10px] font-bold text-blue-600 hover:text-blue-700 transition-colors">
+                              <Paperclip className="w-3 h-3" />
+                              Attach File
+                              <input 
+                                type="file" 
+                                className="hidden" 
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) handleUploadProjectFile('scopeOfWork', file);
+                                }}
+                                accept=".pdf,.docx,.xlsx"
+                              />
+                            </label>
+                          </div>
+                          <textarea
+                            value={selectedProject?.scopeOfWork || ''}
+                            onChange={(e) => handleUpdateProjectDetails({ scopeOfWork: e.target.value })}
+                            className="w-full text-sm text-slate-600 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500/20 p-4 transition-all min-h-[120px] leading-relaxed"
+                            placeholder="Define the scope of work..."
+                          />
+                          {projectFiles.filter(f => f.docId === 'scopeOfWork').length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {projectFiles.filter(f => f.docId === 'scopeOfWork').map(file => (
+                                <div key={file.id} className="flex items-center gap-2 bg-white border border-slate-100 px-3 py-1.5 rounded-lg shadow-sm group">
+                                  <File className="w-3 h-3 text-blue-500" />
+                                  <span className="text-[10px] font-medium text-slate-600 truncate max-w-[200px]">{file.name}</span>
+                                  <button 
+                                    onClick={() => handleDeleteProjectFile(file.id)}
+                                    className="p-1 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded transition-colors"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Use Cases */}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                              <ListChecks className="w-3 h-3" />
+                              Use Cases
+                            </label>
+                            <label className="cursor-pointer group flex items-center gap-1.5 text-[10px] font-bold text-blue-600 hover:text-blue-700 transition-colors">
+                              <Paperclip className="w-3 h-3" />
+                              Attach File
+                              <input 
+                                type="file" 
+                                className="hidden" 
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) handleUploadProjectFile('useCases', file);
+                                }}
+                                accept=".pdf,.docx,.xlsx"
+                              />
+                            </label>
+                          </div>
+                          <textarea
+                            value={selectedProject?.useCases || ''}
+                            onChange={(e) => handleUpdateProjectDetails({ useCases: e.target.value })}
+                            className="w-full text-sm text-slate-600 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500/20 p-4 transition-all min-h-[120px] leading-relaxed"
+                            placeholder="List the primary use cases..."
+                          />
+                          {projectFiles.filter(f => f.docId === 'useCases').length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {projectFiles.filter(f => f.docId === 'useCases').map(file => (
+                                <div key={file.id} className="flex items-center gap-2 bg-white border border-slate-100 px-3 py-1.5 rounded-lg shadow-sm group">
+                                  <File className="w-3 h-3 text-blue-500" />
+                                  <span className="text-[10px] font-medium text-slate-600 truncate max-w-[200px]">{file.name}</span>
+                                  <button 
+                                    onClick={() => handleDeleteProjectFile(file.id)}
+                                    className="p-1 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded transition-colors"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {activeTab === 'RAID' && (
                   <RAIDLog 
                     items={raidItems} 
+                    resources={resources}
                     onUpdate={handleRAIDUpdate}
                     onDelete={handleRAIDDelete}
                     onAdd={(type) => handleAddRAIDItem(type)}
@@ -2515,6 +2838,7 @@ export default function App() {
         <TaskModal
           task={tasks.find(t => t.id === selectedTaskId)!}
           allTasks={tasks}
+          resources={resources}
           isOpen={!!selectedTaskId}
           onClose={() => setSelectedTaskId(null)}
           onUpdate={handleTaskUpdate}
@@ -2670,6 +2994,99 @@ export default function App() {
                 </button>
               </div>
             </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Resource Modal */}
+      {showResourceModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden"
+          >
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <h3 className="text-lg font-bold text-slate-900">{editingResource ? 'Edit Resource' : 'Add New Resource'}</h3>
+              <button onClick={() => setShowResourceModal(false)} className="p-2 hover:bg-white rounded-xl text-slate-400 transition-colors"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.currentTarget);
+              const skills = (formData.get('skills') as string).split(',').map(s => s.trim()).filter(Boolean);
+              const selectedProjectIds = Array.from(formData.getAll('projectIds')) as string[];
+              
+              handleResourceSave({
+                name: formData.get('name') as string,
+                role: formData.get('role') as string,
+                email: formData.get('email') as string,
+                department: formData.get('department') as string,
+                availability: parseInt(formData.get('availability') as string),
+                skills,
+                projectIds: selectedProjectIds
+              });
+            }} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Full Name</label>
+                  <input name="name" defaultValue={editingResource?.name} required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="John Doe" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Role / Title</label>
+                  <input name="role" defaultValue={editingResource?.role} required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="Senior Developer" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Department</label>
+                  <input name="department" defaultValue={editingResource?.department} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="Engineering" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Email Address</label>
+                  <input type="email" name="email" defaultValue={editingResource?.email} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="john@example.com" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Skills (comma separated)</label>
+                  <input name="skills" defaultValue={editingResource?.skills?.join(', ')} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="React, TypeScript, Node.js" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Availability (%)</label>
+                  <input type="range" name="availability" min="0" max="100" defaultValue={editingResource?.availability || 100} className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                  <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+                    <span>0%</span>
+                    <span>50%</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Assign to Projects</label>
+                  <div className="space-y-2 max-h-40 overflow-y-auto p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                    {projects.map(p => (
+                      <label key={p.id} className="flex items-center gap-3 cursor-pointer group">
+                        <input 
+                          type="checkbox" 
+                          name="projectIds" 
+                          value={p.id} 
+                          defaultChecked={editingResource?.projectIds?.includes(p.id)}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/20" 
+                        />
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold text-slate-700 group-hover:text-blue-600 transition-colors">{p.name}</span>
+                          <span className="text-[10px] text-slate-400 uppercase tracking-wider">{p.type === 'RD' ? 'R&D' : 'Delivery'}</span>
+                        </div>
+                      </label>
+                    ))}
+                    {projects.length === 0 && (
+                      <p className="text-xs text-slate-400 italic">No projects available to assign.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="pt-4 flex gap-3">
+                <button type="button" onClick={() => setShowResourceModal(false)} className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+                <button type="submit" disabled={isSaving} className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingResource ? 'Update Resource' : 'Add Resource')}
+                </button>
+              </div>
+            </form>
           </motion.div>
         </div>
       )}

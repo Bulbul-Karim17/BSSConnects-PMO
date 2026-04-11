@@ -1,11 +1,12 @@
 import React from 'react';
-import { Task } from '../types';
+import { Task, Resource } from '../types';
 import { Plus, MoreVertical, Clock, User, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 
 interface AgileBoardProps {
   tasks: Task[];
+  resources: Resource[];
   onTaskUpdate: (taskId: string, updates: Partial<Task>) => void;
   onAddTask: (status: Task['status']) => void;
   onTaskClick: (taskId: string) => void;
@@ -19,7 +20,7 @@ const COLUMNS: { id: Task['status']; label: string; color: string }[] = [
   { id: 'BLOCKED', label: 'Blocked', color: 'bg-red-50 text-red-600' },
 ];
 
-export const AgileBoard: React.FC<AgileBoardProps> = ({ tasks, onTaskUpdate, onAddTask, onTaskClick }) => {
+export const AgileBoard: React.FC<AgileBoardProps> = ({ tasks, resources, onTaskUpdate, onAddTask, onTaskClick }) => {
   return (
     <div className="flex gap-6 overflow-x-auto pb-6 min-h-[600px]">
       {COLUMNS.map((column) => (
@@ -84,14 +85,17 @@ export const AgileBoard: React.FC<AgileBoardProps> = ({ tasks, onTaskUpdate, onA
                   <div className="flex items-center justify-between pt-3 border-t border-slate-50">
                     <div className="flex items-center gap-1.5">
                       <User className="w-3 h-3 text-slate-400" />
-                      <input
-                        type="text"
+                      <select
                         value={task.owner}
                         onChange={(e) => onTaskUpdate(task.id, { owner: e.target.value })}
                         onClick={(e) => e.stopPropagation()}
-                        className="text-[10px] font-medium text-slate-500 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors w-24"
-                        placeholder="Owner"
-                      />
+                        className="text-[10px] font-medium text-slate-500 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors w-24 cursor-pointer appearance-none"
+                      >
+                        <option value="Unassigned">Unassigned</option>
+                        {resources.map(r => (
+                          <option key={r.id} value={r.name}>{r.name}</option>
+                        ))}
+                      </select>
                     </div>
                     <div className="flex items-center gap-1">
                       {COLUMNS.map((col) => (
