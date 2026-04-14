@@ -23,6 +23,17 @@ export interface Project {
   requirementData?: string;
   scopeOfWork?: string;
   useCases?: string;
+  // Project Charter Fields
+  customer?: string;
+  projectManager?: string;
+  sponsor?: string;
+  purpose?: string;
+  objectives?: string;
+  inScope?: string;
+  outScope?: string;
+  approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  approvalDate?: string;
+  approverName?: string;
 }
 
 export interface Task {
@@ -37,6 +48,7 @@ export interface Task {
   endDate?: string;
   duration?: number;
   dependencies?: string[]; // IDs of other tasks
+  raidDependencyIds?: string[]; // IDs of RAID log dependencies
   phase?: string; // For Waterfall
   objective?: string;
   acceptanceCriteria?: string;
@@ -69,6 +81,21 @@ export interface RAIDItem {
   owner: string;
   status: 'OPEN' | 'CLOSED' | 'MITIGATED';
   mitigation: string;
+}
+
+export interface IssueLogItem {
+  id: string;
+  projectId: string;
+  title: string;
+  description: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  owner: string;
+  reportedBy: string;
+  reportedDate: string;
+  resolution?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface Milestone {
@@ -120,6 +147,21 @@ export interface Resource {
   availability: number; // 0-100%
   projectIds: string[]; // Linked projects
   ownerId: string; // The user who created this resource
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ChangeRequest {
+  id: string;
+  projectId: string;
+  title: string;
+  overview: string;
+  objective: string;
+  acceptanceCriteria: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'IMPLEMENTED';
+  priority: 'LOW' | 'MEDIUM' | 'HIGH';
+  requestedBy: string;
+  requestedDate: string;
   createdAt: number;
   updatedAt: number;
 }

@@ -24,7 +24,17 @@
         "meetingSummary": { "type": "string" },
         "requirementData": { "type": "string" },
         "scopeOfWork": { "type": "string" },
-        "useCases": { "type": "string" }
+        "useCases": { "type": "string" },
+        "customer": { "type": "string" },
+        "projectManager": { "type": "string" },
+        "sponsor": { "type": "string" },
+        "purpose": { "type": "string" },
+        "objectives": { "type": "string" },
+        "inScope": { "type": "string" },
+        "outScope": { "type": "string" },
+        "approvalStatus": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] },
+        "approvalDate": { "type": "string" },
+        "approverName": { "type": "string" }
       },
       "required": ["id", "name", "type", "status", "createdAt", "updatedAt", "ownerId"]
     },
@@ -162,6 +172,46 @@
         "updatedAt": { "type": "number" }
       },
       "required": ["id", "name", "role", "ownerId", "createdAt", "updatedAt"]
+    },
+    "ChangeRequest": {
+      "title": "ChangeRequest",
+      "description": "A change request for a delivery project.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "title": { "type": "string" },
+        "overview": { "type": "string" },
+        "objective": { "type": "string" },
+        "acceptanceCriteria": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "IMPLEMENTED"] },
+        "priority": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH"] },
+        "requestedBy": { "type": "string" },
+        "requestedDate": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "projectId", "title", "overview", "objective", "acceptanceCriteria", "status", "priority", "requestedBy", "requestedDate", "createdAt", "updatedAt"]
+    },
+    "IssueLogItem": {
+      "title": "IssueLogItem",
+      "description": "An item in the dedicated Issue Log.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "priority": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        "status": { "type": "string", "enum": ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"] },
+        "owner": { "type": "string" },
+        "reportedBy": { "type": "string" },
+        "reportedDate": { "type": "string" },
+        "resolution": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "projectId", "title", "description", "priority", "status", "owner", "reportedBy", "reportedDate", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -196,6 +246,14 @@
     "/projects/{projectId}/files/{fileId}": {
       "schema": "ProjectFile",
       "description": "Files uploaded to a project."
+    },
+    "/projects/{projectId}/changeRequests/{requestId}": {
+      "schema": "ChangeRequest",
+      "description": "Change requests associated with a project."
+    },
+    "/projects/{projectId}/issueLogItems/{itemId}": {
+      "schema": "IssueLogItem",
+      "description": "Items in the dedicated Issue Log."
     },
     "/resources/{resourceId}": {
       "schema": "Resource",

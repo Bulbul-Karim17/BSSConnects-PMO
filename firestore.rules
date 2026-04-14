@@ -21,6 +21,16 @@ service cloud.firestore {
     //   - startDate: string (optional, ISO 8601)
     //   - targetGoLive: string (optional, ISO 8601)
     //   - ownerId: string (required, matches auth.uid)
+    //   - customer: string (optional)
+    //   - projectManager: string (optional)
+    //   - sponsor: string (optional)
+    //   - purpose: string (optional)
+    //   - objectives: string (optional)
+    //   - inScope: string (optional)
+    //   - outScope: string (optional)
+    //   - approvalStatus: string (optional, enum: ["PENDING", "APPROVED", "REJECTED"])
+    //   - approvalDate: string (optional)
+    //   - approverName: string (optional)
     //
     // Sub-collection: tasks
     // Fields:
@@ -98,6 +108,19 @@ service cloud.firestore {
              (!('meetingDate' in data) || (data.meetingDate is string && data.meetingDate.size() < 100)) &&
              (!('meetingOwner' in data) || (data.meetingOwner is string && data.meetingOwner.size() < 200)) &&
              (!('meetingSummary' in data) || (data.meetingSummary is string && data.meetingSummary.size() < 5000)) &&
+             (!('customer' in data) || (data.customer is string && data.customer.size() < 200)) &&
+             (!('projectManager' in data) || (data.projectManager is string && data.projectManager.size() < 200)) &&
+             (!('sponsor' in data) || (data.sponsor is string && data.sponsor.size() < 200)) &&
+             (!('purpose' in data) || (data.purpose is string && data.purpose.size() < 5000)) &&
+             (!('objectives' in data) || (data.objectives is string && data.objectives.size() < 5000)) &&
+             (!('inScope' in data) || (data.inScope is string && data.inScope.size() < 5000)) &&
+             (!('outScope' in data) || (data.outScope is string && data.outScope.size() < 5000)) &&
+             (!('approvalStatus' in data) || data.approvalStatus in ["PENDING", "APPROVED", "REJECTED"]) &&
+             (!('approvalDate' in data) || (data.approvalDate is string && data.approvalDate.size() < 100)) &&
+             (!('approverName' in data) || (data.approverName is string && data.approverName.size() < 200)) &&
+             (!('requirementData' in data) || (data.requirementData is string && data.requirementData.size() < 5000)) &&
+             (!('scopeOfWork' in data) || (data.scopeOfWork is string && data.scopeOfWork.size() < 5000)) &&
+             (!('useCases' in data) || (data.useCases is string && data.useCases.size() < 5000)) &&
              (data.ownerId == request.auth.uid || (isAdmin() && data.ownerId != null));
     }
 
@@ -165,6 +188,34 @@ service cloud.firestore {
              data.size is number &&
              data.url is string &&
              data.uploadedAt is number;
+    }
+
+    function isValidChangeRequest(data) {
+      return data.keys().hasAll(['id', 'projectId', 'title', 'overview', 'objective', 'acceptanceCriteria', 'status', 'priority', 'requestedBy', 'requestedDate', 'createdAt', 'updatedAt']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.overview is string && data.overview.size() < 2000 &&
+             data.objective is string && data.objective.size() < 2000 &&
+             data.acceptanceCriteria is string && data.acceptanceCriteria.size() < 5000 &&
+             data.status in ['PENDING', 'APPROVED', 'REJECTED', 'IMPLEMENTED'] &&
+             data.priority in ['LOW', 'MEDIUM', 'HIGH'] &&
+             data.requestedBy is string &&
+             data.requestedDate is string &&
+             data.createdAt is number &&
+             data.updatedAt is number;
+    }
+
+    function isValidIssueLogItem(data) {
+      return data.keys().hasAll(['id', 'projectId', 'title', 'description', 'priority', 'status', 'owner', 'reportedBy', 'reportedDate', 'createdAt', 'updatedAt']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.description is string && data.description.size() < 2000 &&
+             data.priority in ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] &&
+             data.status in ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] &&
+             data.owner is string &&
+             data.reportedBy is string &&
+             data.reportedDate is string &&
+             (!('resolution' in data) || (data.resolution is string && data.resolution.size() < 2000)) &&
+             data.createdAt is number &&
+             data.updatedAt is number;
     }
 
     function isValidResource(data) {
@@ -254,6 +305,20 @@ service cloud.firestore {
       match /files/{fileId} {
         allow read: if isProjectOwner(projectId);
         allow create: if isProjectOwner(projectId) && isValidProjectFile(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+
+      match /changeRequests/{requestId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId) && isValidChangeRequest(request.resource.data);
+        allow update: if isProjectOwner(projectId) && isValidChangeRequest(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+
+      match /issueLogItems/{itemId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId) && isValidIssueLogItem(request.resource.data);
+        allow update: if isProjectOwner(projectId) && isValidIssueLogItem(request.resource.data);
         allow delete: if isProjectOwner(projectId);
       }
     }

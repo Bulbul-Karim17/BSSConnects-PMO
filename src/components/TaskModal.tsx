@@ -1,23 +1,25 @@
 import React from 'react';
-import { Task, Resource } from '../types';
-import { X, User, Calendar, Flag, CheckCircle2, Layout, Target, ListChecks, FileText, Link as LinkIcon, Plus, Trash2 } from 'lucide-react';
+import { Task, Resource, RAIDItem } from '../types';
+import { X, User, Calendar, Flag, CheckCircle2, Layout, Target, ListChecks, FileText, Link as LinkIcon, Plus, Trash2, ShieldAlert } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 
 interface TaskModalProps {
   task: Task;
   allTasks: Task[];
+  raidItems: RAIDItem[];
   resources: Resource[];
   isOpen: boolean;
   onClose: () => void;
   onUpdate: (taskId: string, updates: Partial<Task>) => void;
 }
 
-export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, resources, isOpen, onClose, onUpdate }) => {
+export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, raidItems, resources, isOpen, onClose, onUpdate }) => {
   if (!isOpen) return null;
 
   const otherTasks = allTasks.filter(t => t.id !== task.id);
   const dependencies = task.dependencies || [];
+  const raidDependencies = task.raidDependencyIds || [];
 
   const handleAddDependency = (depId: string) => {
     if (!dependencies.includes(depId)) {
@@ -27,6 +29,16 @@ export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, resources,
 
   const handleRemoveDependency = (depId: string) => {
     onUpdate(task.id, { dependencies: dependencies.filter(id => id !== depId) });
+  };
+
+  const handleAddRaidDependency = (raidId: string) => {
+    if (!raidDependencies.includes(raidId)) {
+      onUpdate(task.id, { raidDependencyIds: [...raidDependencies, raidId] });
+    }
+  };
+
+  const handleRemoveRaidDependency = (raidId: string) => {
+    onUpdate(task.id, { raidDependencyIds: raidDependencies.filter(id => id !== raidId) });
   };
 
   return (
@@ -216,6 +228,62 @@ export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, resources,
                     .map(t => (
                       <option key={t.id} value={t.id}>
                         {t.title}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+
+            {/* RAID Log Dependencies */}
+            <div className="space-y-4">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <ShieldAlert className="w-3 h-3" />
+                RAID Log Dependencies
+              </label>
+              
+              <div className="space-y-2">
+                {raidDependencies.map(raidId => {
+                  const raidItem = raidItems.find(r => r.id === raidId);
+                  return (
+                    <div key={raidId} className="flex items-center justify-between p-3 bg-amber-50 rounded-xl group hover:bg-amber-100 transition-all border border-amber-100">
+                      <div className="flex items-center gap-3 overflow-hidden">
+                        <div className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                        <span className="text-sm text-amber-900 truncate font-medium">
+                          {raidItem ? raidItem.description : 'Unknown RAID Item'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveRaidDependency(raidId)}
+                        className="p-1.5 text-amber-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })}
+                
+                {raidDependencies.length === 0 && (
+                  <p className="text-xs text-slate-400 italic px-1">No RAID dependencies linked yet.</p>
+                )}
+              </div>
+
+              <div className="pt-2">
+                <select
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      handleAddRaidDependency(e.target.value);
+                      e.target.value = '';
+                    }
+                  }}
+                  className="w-full text-sm text-amber-700 bg-amber-50 border-none rounded-xl focus:ring-2 focus:ring-amber-500/20 p-3 transition-all appearance-none cursor-pointer hover:bg-amber-100"
+                  defaultValue=""
+                >
+                  <option value="" disabled>+ Link RAID Dependency...</option>
+                  {raidItems
+                    .filter(r => r.type === 'DEPENDENCY' && !raidDependencies.includes(r.id))
+                    .map(r => (
+                      <option key={r.id} value={r.id}>
+                        {r.description} ({r.status})
                       </option>
                     ))}
                 </select>

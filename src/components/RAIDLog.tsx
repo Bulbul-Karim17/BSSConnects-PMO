@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { RAIDItem, Resource } from '../types';
+import { RAIDItem, Resource, Task } from '../types';
 import { 
   AlertTriangle, 
   HelpCircle, 
@@ -18,10 +18,12 @@ import { cn } from '../lib/utils';
 
 interface RAIDLogProps {
   items: RAIDItem[];
+  tasks: Task[];
   resources: Resource[];
   onUpdate?: (id: string, updates: Partial<RAIDItem>) => void;
   onDelete?: (id: string) => void;
   onAdd?: (type: RAIDItem['type']) => void;
+  hideTabs?: boolean;
 }
 
 const TYPE_CONFIG = {
@@ -31,7 +33,7 @@ const TYPE_CONFIG = {
   ISSUE: { icon: AlertCircle, color: 'text-red-600 bg-red-50', border: 'border-red-100', label: 'Issues' },
 };
 
-export const RAIDLog: React.FC<RAIDLogProps> = ({ items, resources, onUpdate, onDelete, onAdd }) => {
+export const RAIDLog: React.FC<RAIDLogProps> = ({ items, tasks, resources, onUpdate, onDelete, onAdd, hideTabs }) => {
   const [activeType, setActiveType] = useState<RAIDItem['type'] | 'ALL'>('ALL');
 
   const filteredItems = activeType === 'ALL' 
@@ -65,32 +67,34 @@ export const RAIDLog: React.FC<RAIDLogProps> = ({ items, resources, onUpdate, on
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-fit">
-        <button
-          onClick={() => setActiveType('ALL')}
-          className={cn(
-            "px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2",
-            activeType === 'ALL' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
-          )}
-        >
-          All Items
-          <span className="px-1.5 py-0.5 rounded-md bg-slate-200 text-[10px]">{stats.ALL}</span>
-        </button>
-        {Object.entries(TYPE_CONFIG).map(([type, config]) => (
+      {!hideTabs && (
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-fit">
           <button
-            key={type}
-            onClick={() => setActiveType(type as RAIDItem['type'])}
+            onClick={() => setActiveType('ALL')}
             className={cn(
               "px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2",
-              activeType === type ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              activeType === 'ALL' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
             )}
           >
-            <config.icon className={cn("w-3.5 h-3.5", config.color.split(' ')[0])} />
-            {config.label}
-            <span className="px-1.5 py-0.5 rounded-md bg-slate-200 text-[10px]">{stats[type as keyof typeof stats]}</span>
+            All Items
+            <span className="px-1.5 py-0.5 rounded-md bg-slate-200 text-[10px]">{stats.ALL}</span>
           </button>
-        ))}
-      </div>
+          {Object.entries(TYPE_CONFIG).map(([type, config]) => (
+            <button
+              key={type}
+              onClick={() => setActiveType(type as RAIDItem['type'])}
+              className={cn(
+                "px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2",
+                activeType === type ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              <config.icon className={cn("w-3.5 h-3.5", config.color.split(' ')[0])} />
+              {config.label}
+              <span className="px-1.5 py-0.5 rounded-md bg-slate-200 text-[10px]">{stats[type as keyof typeof stats]}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Professional Table */}
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
@@ -100,6 +104,7 @@ export const RAIDLog: React.FC<RAIDLogProps> = ({ items, resources, onUpdate, on
               <tr className="bg-slate-50/50 border-b border-slate-100">
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Type / Category</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Description & Mitigation</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Linked Tasks</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Impact</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Owner / Status</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Actions</th>
@@ -154,6 +159,19 @@ export const RAIDLog: React.FC<RAIDLogProps> = ({ items, resources, onUpdate, on
                             placeholder="Mitigation / Action"
                           />
                         </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col gap-1">
+                        {tasks.filter(t => t.raidDependencyIds?.includes(item.id)).map(t => (
+                          <div key={t.id} className="flex items-center gap-1 text-[10px] text-blue-600 font-bold bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                            <ShieldAlert className="w-2.5 h-2.5" />
+                            <span className="truncate max-w-[100px]">{t.title}</span>
+                          </div>
+                        ))}
+                        {tasks.filter(t => t.raidDependencyIds?.includes(item.id)).length === 0 && (
+                          <span className="text-[10px] text-slate-300 italic">No links</span>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4">

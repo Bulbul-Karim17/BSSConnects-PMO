@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Project, Task, RAIDItem, Milestone, RDPhase, Phase, DesignDoc, ProjectFile, Sprint, Resource } from './types';
+import { Project, Task, RAIDItem, Milestone, RDPhase, Phase, DesignDoc, ProjectFile, Sprint, Resource, ChangeRequest, IssueLogItem } from './types';
 import { ProjectCard } from './components/ProjectCard';
 import { FileUpload } from './components/FileUpload';
 import { AgileBoard } from './components/AgileBoard';
 import { WBSView } from './components/WBSView';
 import { WaterfallView } from './components/WaterfallView';
 import { RAIDLog } from './components/RAIDLog';
+import { IssueLog } from './components/IssueLog';
+import { ChangeRegister } from './components/ChangeRegister';
 import { Roadmap } from './components/Roadmap';
 import { DataStory } from './components/DataStory';
+import { ProjectCharter } from './components/ProjectCharter';
 import { TaskModal } from './components/TaskModal';
 import { 
   LayoutDashboard, 
@@ -22,6 +25,7 @@ import {
   ArrowLeft,
   Zap,
   Briefcase,
+  RefreshCw,
   Layers,
   BarChart3,
   ShieldAlert,
@@ -67,7 +71,7 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [mainView, setMainView] = useState<'DASHBOARD' | 'PROJECTS' | 'CALENDAR' | 'REPORTS' | 'RESOURCES'>('DASHBOARD');
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'DATA_STORY' | 'LIBRARY'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'CHARTER' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'DATA_STORY' | 'LIBRARY' | 'ISSUE_TRACKER' | 'CHANGES'>('OVERVIEW');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [selectedTypeForCreation, setSelectedTypeForCreation] = useState<'RD' | 'DELIVERY' | null>(null);
@@ -124,6 +128,8 @@ export default function App() {
   const [designDocs, setDesignDocs] = useState<DesignDoc[]>([]);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
+  const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>([]);
+  const [issueLogItems, setIssueLogItems] = useState<IssueLogItem[]>([]);
   const [showResourceModal, setShowResourceModal] = useState(false);
   const [editingResource, setEditingResource] = useState<Resource | null>(null);
 
@@ -193,6 +199,8 @@ export default function App() {
       setPhases([]);
       setDesignDocs([]);
       setProjectFiles([]);
+      setChangeRequests([]);
+      setIssueLogItems([]);
       return;
     }
 
@@ -224,6 +232,14 @@ export default function App() {
       setProjectFiles(snapshot.docs.map(doc => doc.data() as ProjectFile));
     }, (error) => handleFirestoreError(error, OperationType.GET, `projects/${selectedProjectId}/files`));
 
+    const changesUnsubscribe = onSnapshot(collection(db, 'projects', selectedProjectId, 'changeRequests'), (snapshot) => {
+      setChangeRequests(snapshot.docs.map(doc => doc.data() as ChangeRequest).sort((a, b) => b.createdAt - a.createdAt));
+    }, (error) => handleFirestoreError(error, OperationType.GET, `projects/${selectedProjectId}/changeRequests`));
+
+    const issuesUnsubscribe = onSnapshot(collection(db, 'projects', selectedProjectId, 'issueLogItems'), (snapshot) => {
+      setIssueLogItems(snapshot.docs.map(doc => doc.data() as IssueLogItem).sort((a, b) => b.createdAt - a.createdAt));
+    }, (error) => handleFirestoreError(error, OperationType.GET, `projects/${selectedProjectId}/issueLogItems`));
+
     return () => {
       tasksUnsubscribe();
       raidUnsubscribe();
@@ -232,6 +248,8 @@ export default function App() {
       sprintsUnsubscribe();
       designDocsUnsubscribe();
       filesUnsubscribe();
+      changesUnsubscribe();
+      issuesUnsubscribe();
     };
   }, [selectedProjectId, user]);
 
@@ -290,7 +308,7 @@ export default function App() {
 
   const handleUpdateProjectDetails = async (details: Partial<Project>) => {
     if (!selectedProjectId || !user) return;
-    
+    setIsSaving(true);
     try {
       await updateDoc(doc(db, 'projects', selectedProjectId), {
         ...details,
@@ -299,6 +317,8 @@ export default function App() {
     } catch (error) {
       console.error("Error updating project details:", error);
       handleFirestoreError(error, OperationType.UPDATE, `projects/${selectedProjectId}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -351,6 +371,128 @@ export default function App() {
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } catch (error) {
           handleFirestoreError(error, OperationType.DELETE, `resources/${resourceId}`);
+        }
+      }
+    });
+  };
+
+  // Change Request Handlers
+  const handleAddChangeRequest = async (data: Partial<ChangeRequest>) => {
+    if (!selectedProjectId || !user) return;
+    setIsSaving(true);
+    try {
+      const requestId = Math.random().toString(36).substr(2, 9);
+      const newRequest: ChangeRequest = {
+        id: requestId,
+        projectId: selectedProjectId,
+        title: data.title || '',
+        overview: data.overview || '',
+        objective: data.objective || '',
+        acceptanceCriteria: data.acceptanceCriteria || '',
+        status: data.status || 'PENDING',
+        priority: data.priority || 'MEDIUM',
+        requestedBy: data.requestedBy || '',
+        requestedDate: data.requestedDate || new Date().toISOString().split('T')[0],
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+      await setDoc(doc(db, 'projects', selectedProjectId, 'changeRequests', requestId), newRequest);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `projects/${selectedProjectId}/changeRequests`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleUpdateChangeRequest = async (id: string, updates: Partial<ChangeRequest>) => {
+    if (!selectedProjectId) return;
+    try {
+      await updateDoc(doc(db, 'projects', selectedProjectId, 'changeRequests', id), {
+        ...updates,
+        updatedAt: Date.now()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `projects/${selectedProjectId}/changeRequests/${id}`);
+    }
+  };
+
+  const handleDeleteChangeRequest = (id: string) => {
+    const request = changeRequests.find(r => r.id === id);
+    if (!request) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Change Request?',
+      message: `Are you sure you want to delete "${request.title}"? This action cannot be undone.`,
+      type: 'danger',
+      confirmText: 'Delete Request',
+      onConfirm: async () => {
+        if (!selectedProjectId) return;
+        try {
+          await deleteDoc(doc(db, 'projects', selectedProjectId, 'changeRequests', id));
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/changeRequests/${id}`);
+        }
+      }
+    });
+  };
+
+  // Issue Log Handlers
+  const handleAddIssueLogItem = async (data: Partial<IssueLogItem>) => {
+    if (!selectedProjectId || !user) return;
+    setIsSaving(true);
+    try {
+      const itemId = Math.random().toString(36).substr(2, 9);
+      const newItem: IssueLogItem = {
+        id: itemId,
+        projectId: selectedProjectId,
+        title: data.title || '',
+        description: data.description || '',
+        priority: data.priority || 'MEDIUM',
+        status: data.status || 'OPEN',
+        owner: data.owner || 'Unassigned',
+        reportedBy: data.reportedBy || user.displayName || 'Unknown',
+        reportedDate: data.reportedDate || new Date().toISOString().split('T')[0],
+        resolution: data.resolution || '',
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+      await setDoc(doc(db, 'projects', selectedProjectId, 'issueLogItems', itemId), newItem);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `projects/${selectedProjectId}/issueLogItems`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleUpdateIssueLogItem = async (id: string, updates: Partial<IssueLogItem>) => {
+    if (!selectedProjectId) return;
+    try {
+      await updateDoc(doc(db, 'projects', selectedProjectId, 'issueLogItems', id), {
+        ...updates,
+        updatedAt: Date.now()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `projects/${selectedProjectId}/issueLogItems/${id}`);
+    }
+  };
+
+  const handleDeleteIssueLogItem = (id: string) => {
+    const item = issueLogItems.find(i => i.id === id);
+    if (!item) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Issue?',
+      message: `Are you sure you want to delete "${item.title}"? This action cannot be undone.`,
+      type: 'danger',
+      confirmText: 'Delete Issue',
+      onConfirm: async () => {
+        if (!selectedProjectId) return;
+        try {
+          await deleteDoc(doc(db, 'projects', selectedProjectId, 'issueLogItems', id));
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/issueLogItems/${id}`);
         }
       }
     });
@@ -1718,40 +1860,74 @@ export default function App() {
               className="space-y-6"
             >
               {/* Project Header Tabs */}
-              <div className="bg-white border border-slate-200 rounded-xl p-1 flex items-center gap-1 w-fit overflow-x-auto max-w-full">
-                {[
-                  { id: 'OVERVIEW', label: 'Overview', icon: LayoutDashboard },
-                  ...(selectedProject?.type === 'RD' ? [
-                    { id: 'BACKLOG', label: 'Backlog', icon: Layers },
-                    { id: 'TASKS', label: 'Scrum Board', icon: Layers },
-                  ] : [
-                    { id: 'WBS', label: 'WBS', icon: Layers },
-                    { id: 'ACTIVITY', label: 'Action Point', icon: CheckCircle2 },
-                    { id: 'ROADMAP', label: 'Roadmap', icon: Calendar },
-                    { id: 'LIBRARY', label: 'Library Data', icon: BookOpen },
-                  ]),
-                  { id: 'RAID', label: 'RAID Log', icon: ShieldAlert },
-                  ...(selectedProject?.type === 'RD' ? [
-                    { id: 'ROADMAP', label: 'Roadmap', icon: Calendar },
-                    { id: 'DATA_STORY', label: 'Data Story', icon: FileText }
-                  ] : []),
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id as any)}
-                    className={cn(
-                      "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap",
-                      activeTab === tab.id ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "text-slate-500 hover:bg-slate-50"
-                    )}
-                  >
-                    <tab.icon className="w-4 h-4" />
-                    {tab.label}
-                  </button>
-                ))}
+              <div className="flex flex-col gap-2">
+                {/* Row 1 */}
+                <div className="bg-white border border-slate-200 rounded-xl p-1 flex items-center gap-1 w-fit overflow-x-auto max-w-full">
+                  {[
+                    { id: 'OVERVIEW', label: 'Overview', icon: LayoutDashboard },
+                    { id: 'CHARTER', label: 'Project Charter', icon: FileText },
+                    ...(selectedProject?.type === 'RD' ? [
+                      { id: 'BACKLOG', label: 'Backlog', icon: Layers },
+                      { id: 'TASKS', label: 'Scrum Board', icon: Layers },
+                    ] : [
+                      { id: 'LIBRARY', label: 'Library Data', icon: BookOpen },
+                      { id: 'ROADMAP', label: 'Roadmap', icon: Calendar },
+                      { id: 'WBS', label: 'WBS', icon: Layers },
+                    ]),
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id as any)}
+                      className={cn(
+                        "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap",
+                        activeTab === tab.id ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "text-slate-500 hover:bg-slate-50"
+                      )}
+                    >
+                      <tab.icon className="w-4 h-4" />
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Row 2 */}
+                <div className="bg-white border border-slate-200 rounded-xl p-1 flex items-center gap-1 w-fit overflow-x-auto max-w-full">
+                  {[
+                    { id: 'RAID', label: 'RAID Log', icon: ShieldAlert },
+                    ...(selectedProject?.type === 'DELIVERY' ? [
+                      { id: 'ISSUE_TRACKER', label: 'Issue tracker', icon: AlertCircle },
+                      { id: 'CHANGES', label: 'Change Register', icon: RefreshCw },
+                      { id: 'ACTIVITY', label: 'Action Point', icon: CheckCircle2 },
+                    ] : []),
+                    ...(selectedProject?.type === 'RD' ? [
+                      { id: 'ROADMAP', label: 'Roadmap', icon: Calendar },
+                      { id: 'DATA_STORY', label: 'Data Story', icon: FileText }
+                    ] : []),
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id as any)}
+                      className={cn(
+                        "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap",
+                        activeTab === tab.id ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "text-slate-500 hover:bg-slate-50"
+                      )}
+                    >
+                      <tab.icon className="w-4 h-4" />
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Tab Content */}
               <div className="mt-6">
+                {activeTab === 'CHARTER' && selectedProject && (
+                  <ProjectCharter 
+                    project={selectedProject} 
+                    onUpdate={handleUpdateProjectDetails}
+                    isSaving={isSaving}
+                  />
+                )}
+
                 {activeTab === 'OVERVIEW' && (
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     <div className="lg:col-span-2 space-y-8">
@@ -2210,6 +2386,7 @@ export default function App() {
                       </div>
                       <WBSView 
                         tasks={tasks} 
+                        raidItems={raidItems}
                         projectFiles={projectFiles}
                         projectId={selectedProjectId || ''}
                         onTaskUpdate={handleTaskUpdate}
@@ -2515,11 +2692,32 @@ export default function App() {
 
                 {activeTab === 'RAID' && (
                   <RAIDLog 
-                    items={raidItems} 
+                    items={raidItems.filter(i => i.type !== 'ISSUE')} 
+                    tasks={tasks}
                     resources={resources}
                     onUpdate={handleRAIDUpdate}
                     onDelete={handleRAIDDelete}
                     onAdd={(type) => handleAddRAIDItem(type)}
+                  />
+                )}
+
+                {activeTab === 'ISSUE_TRACKER' && (
+                  <IssueLog 
+                    items={issueLogItems} 
+                    resources={resources}
+                    onAdd={handleAddIssueLogItem}
+                    onUpdate={handleUpdateIssueLogItem}
+                    onDelete={handleDeleteIssueLogItem}
+                  />
+                )}
+
+                {activeTab === 'CHANGES' && (
+                  <ChangeRegister 
+                    requests={changeRequests}
+                    resources={resources}
+                    onAdd={handleAddChangeRequest}
+                    onUpdate={handleUpdateChangeRequest}
+                    onDelete={handleDeleteChangeRequest}
                   />
                 )}
 
@@ -2838,6 +3036,7 @@ export default function App() {
         <TaskModal
           task={tasks.find(t => t.id === selectedTaskId)!}
           allTasks={tasks}
+          raidItems={raidItems}
           resources={resources}
           isOpen={!!selectedTaskId}
           onClose={() => setSelectedTaskId(null)}
