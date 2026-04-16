@@ -1,8 +1,9 @@
-import React from 'react';
-import { Task, Resource, RAIDItem } from '../types';
-import { X, User, Calendar, Flag, CheckCircle2, Layout, Target, ListChecks, FileText, Link as LinkIcon, Plus, Trash2, ShieldAlert } from 'lucide-react';
+import React, { useState } from 'react';
+import { Task, Resource, RAIDItem, TaskComment } from '../types';
+import { X, User, Calendar, Flag, CheckCircle2, Layout, Target, ListChecks, FileText, Link as LinkIcon, Plus, Trash2, ShieldAlert, Send, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
+import { User as FirebaseUser } from 'firebase/auth';
 
 interface TaskModalProps {
   task: Task;
@@ -10,16 +11,41 @@ interface TaskModalProps {
   raidItems: RAIDItem[];
   resources: Resource[];
   isOpen: boolean;
+  currentUser: FirebaseUser | null;
   onClose: () => void;
   onUpdate: (taskId: string, updates: Partial<Task>) => void;
 }
 
-export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, raidItems, resources, isOpen, onClose, onUpdate }) => {
+export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, raidItems, resources, isOpen, currentUser, onClose, onUpdate }) => {
+  const [newComment, setNewComment] = useState('');
   if (!isOpen) return null;
 
   const otherTasks = allTasks.filter(t => t.id !== task.id);
   const dependencies = task.dependencies || [];
   const raidDependencies = task.raidDependencyIds || [];
+  const commentsList = task.commentsList || [];
+
+  const handleAddComment = () => {
+    if (!newComment.trim()) return;
+
+    const comment: TaskComment = {
+      id: crypto.randomUUID(),
+      text: newComment.trim(),
+      author: currentUser?.displayName || currentUser?.email || 'Unknown User',
+      date: Date.now()
+    };
+
+    onUpdate(task.id, { 
+      commentsList: [...commentsList, comment] 
+    });
+    setNewComment('');
+  };
+
+  const handleRemoveComment = (commentId: string) => {
+    onUpdate(task.id, {
+      commentsList: commentsList.filter(c => c.id !== commentId)
+    });
+  };
 
   const handleAddDependency = (depId: string) => {
     if (!dependencies.includes(depId)) {
@@ -65,14 +91,22 @@ export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, raidItems,
                   placeholder="Task Title"
                 />
                 <div className="flex items-center gap-2 mt-1">
-                  <span className={cn(
-                    "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                    task.status === 'DONE' ? "bg-emerald-100 text-emerald-700" :
-                    task.status === 'IN_PROGRESS' ? "bg-amber-100 text-amber-700" :
-                    task.status === 'BLOCKED' ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"
-                  )}>
-                    {task.status.replace('_', ' ')}
-                  </span>
+                  <select
+                    value={task.status}
+                    onChange={(e) => onUpdate(task.id, { status: e.target.value as any })}
+                    className={cn(
+                      "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border-none focus:ring-0 cursor-pointer appearance-none",
+                      task.status === 'DONE' ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" :
+                      task.status === 'IN_PROGRESS' ? "bg-blue-100 text-blue-700 hover:bg-blue-200" :
+                      task.status === 'BLOCKED' ? "bg-red-100 text-red-700 hover:bg-red-200" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    )}
+                  >
+                    <option value="TODO">To Do</option>
+                    <option value="IN_PROGRESS">In Progress</option>
+                    <option value="DONE">Done</option>
+                    <option value="BLOCKED">Blocked</option>
+                    <option value="BACKLOG">Backlog</option>
+                  </select>
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">•</span>
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{task.workstream}</span>
                 </div>
@@ -164,18 +198,70 @@ export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, raidItems,
               />
             </div>
 
-            {/* MoM Details */}
-            <div className="space-y-3">
+            {/* Comments Section */}
+            <div className="space-y-4">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                <FileText className="w-3 h-3" />
-                Minutes of Meeting (MoM)
+                <MessageSquare className="w-3 h-3" />
+                Comments & Updates
               </label>
-              <textarea
-                value={task.momDetails || ''}
-                onChange={(e) => onUpdate(task.id, { momDetails: e.target.value })}
-                className="w-full text-sm text-slate-600 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500/20 p-4 transition-all min-h-[120px] leading-relaxed"
-                placeholder="Add meeting notes, decisions, and key takeaways here..."
-              />
+              
+              <div className="space-y-4">
+                {commentsList.map(comment => (
+                  <div key={comment.id} className="bg-slate-50 rounded-2xl p-4 space-y-2 group relative">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-[10px] font-bold text-blue-600">
+                          {comment.author.charAt(0).toUpperCase()}
+                        </div>
+                        <span className="text-xs font-bold text-slate-700">{comment.author}</span>
+                        <span className="text-[10px] text-slate-400">
+                          {new Date(comment.date).toLocaleString()}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveComment(comment.id)}
+                        className="p-1 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <p className="text-sm text-slate-600 leading-relaxed pl-8">
+                      {comment.text}
+                    </p>
+                  </div>
+                ))}
+
+                {commentsList.length === 0 && (
+                  <div className="text-center py-8 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-100">
+                    <MessageSquare className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                    <p className="text-xs text-slate-400 italic">No comments yet. Start the conversation!</p>
+                  </div>
+                )}
+
+                <div className="flex items-start gap-3 pt-2">
+                  <div className="flex-grow">
+                    <textarea
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleAddComment();
+                        }
+                      }}
+                      className="w-full text-sm text-slate-600 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500/20 p-4 transition-all min-h-[80px] leading-relaxed"
+                      placeholder="Add a comment or update..."
+                    />
+                  </div>
+                  <button
+                    onClick={handleAddComment}
+                    disabled={!newComment.trim()}
+                    className="p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-50 disabled:shadow-none"
+                  >
+                    <Send className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Dependencies */}

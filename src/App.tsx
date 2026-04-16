@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Project, Task, RAIDItem, Milestone, RDPhase, Phase, DesignDoc, ProjectFile, Sprint, Resource, ChangeRequest, IssueLogItem } from './types';
+import { Project, Task, RAIDItem, Milestone, RDPhase, Phase, DesignDoc, ProjectFile, Sprint, Resource, ChangeRequest, IssueLogItem, Retrospective } from './types';
 import { ProjectCard } from './components/ProjectCard';
 import { FileUpload } from './components/FileUpload';
 import { AgileBoard } from './components/AgileBoard';
@@ -12,6 +12,7 @@ import { Roadmap } from './components/Roadmap';
 import { DataStory } from './components/DataStory';
 import { ProjectCharter } from './components/ProjectCharter';
 import { TaskModal } from './components/TaskModal';
+import { RetrospectiveView } from './components/RetrospectiveView';
 import { 
   LayoutDashboard, 
   Plus, 
@@ -23,6 +24,7 @@ import {
   Users,
   ChevronRight, 
   ArrowLeft,
+  History,
   Zap,
   Briefcase,
   RefreshCw,
@@ -71,7 +73,7 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [mainView, setMainView] = useState<'DASHBOARD' | 'PROJECTS' | 'CALENDAR' | 'REPORTS' | 'RESOURCES'>('DASHBOARD');
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'CHARTER' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'DATA_STORY' | 'LIBRARY' | 'ISSUE_TRACKER' | 'CHANGES'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'CHARTER' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'DATA_STORY' | 'LIBRARY' | 'ISSUE_TRACKER' | 'CHANGES' | 'RETRO'>('OVERVIEW');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [selectedTypeForCreation, setSelectedTypeForCreation] = useState<'RD' | 'DELIVERY' | null>(null);
@@ -130,6 +132,7 @@ export default function App() {
   const [resources, setResources] = useState<Resource[]>([]);
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>([]);
   const [issueLogItems, setIssueLogItems] = useState<IssueLogItem[]>([]);
+  const [retrospectives, setRetrospectives] = useState<Retrospective[]>([]);
   const [showResourceModal, setShowResourceModal] = useState(false);
   const [editingResource, setEditingResource] = useState<Resource | null>(null);
 
@@ -240,6 +243,10 @@ export default function App() {
       setIssueLogItems(snapshot.docs.map(doc => doc.data() as IssueLogItem).sort((a, b) => b.createdAt - a.createdAt));
     }, (error) => handleFirestoreError(error, OperationType.GET, `projects/${selectedProjectId}/issueLogItems`));
 
+    const retrospectivesUnsubscribe = onSnapshot(collection(db, 'projects', selectedProjectId, 'retrospectives'), (snapshot) => {
+      setRetrospectives(snapshot.docs.map(doc => doc.data() as Retrospective));
+    }, (error) => handleFirestoreError(error, OperationType.GET, `projects/${selectedProjectId}/retrospectives`));
+
     return () => {
       tasksUnsubscribe();
       raidUnsubscribe();
@@ -250,6 +257,7 @@ export default function App() {
       filesUnsubscribe();
       changesUnsubscribe();
       issuesUnsubscribe();
+      retrospectivesUnsubscribe();
     };
   }, [selectedProjectId, user]);
 
@@ -1071,6 +1079,31 @@ export default function App() {
     }
   };
 
+  const handleSaveRetro = async (retro: Partial<Retrospective>) => {
+    if (!selectedProjectId || !user) return;
+    try {
+      const retroId = retro.id || crypto.randomUUID();
+      const retroDoc = doc(db, 'projects', selectedProjectId, 'retrospectives', retroId);
+      await setDoc(retroDoc, {
+        ...retro,
+        id: retroId,
+        projectId: selectedProjectId,
+        updatedAt: Date.now()
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `projects/${selectedProjectId}/retrospectives`);
+    }
+  };
+
+  const handleDeleteRetro = async (retroId: string) => {
+    if (!selectedProjectId || !user) return;
+    try {
+      await deleteDoc(doc(db, 'projects', selectedProjectId, 'retrospectives', retroId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/retrospectives/${retroId}`);
+    }
+  };
+
   const handleRAIDUpdate = async (raidId: string, updates: Partial<RAIDItem>) => {
     if (!selectedProjectId || !user) return;
 
@@ -1236,6 +1269,13 @@ export default function App() {
     { name: 'Done', count: tasks.filter(t => t.status === 'DONE').length, color: '#10b981' },
     { name: 'Active', count: tasks.filter(t => t.status === 'IN_PROGRESS' || t.status === 'TODO').length, color: '#3b82f6' },
     { name: 'Blocked', count: tasks.filter(t => t.status === 'BLOCKED').length, color: '#ef4444' },
+  ];
+
+  const projectStatusData = [
+    { name: 'Planned', value: projects.filter(p => p.status === 'PLANNED').length, color: '#94a3b8' },
+    { name: 'Active', value: projects.filter(p => p.status === 'ACTIVE').length, color: '#3b82f6' },
+    { name: 'Completed', value: projects.filter(p => p.status === 'COMPLETED').length, color: '#10b981' },
+    { name: 'On Hold', value: projects.filter(p => p.status === 'ON_HOLD').length, color: '#f59e0b' },
   ];
 
   return (
@@ -1694,19 +1734,24 @@ export default function App() {
                       </div>
                     </div>
                     <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                      <h3 className="font-bold text-slate-900 mb-6">Task Status Distribution</h3>
+                      <h3 className="font-bold text-slate-900 mb-6">Project Status Distribution</h3>
                       <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={statusChartData}>
-                            <XAxis dataKey="name" fontSize={10} />
-                            <YAxis fontSize={10} />
-                            <Tooltip />
-                            <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                              {statusChartData.map((entry, index) => (
+                          <PieChart>
+                            <Pie
+                              data={projectStatusData}
+                              innerRadius={60}
+                              outerRadius={80}
+                              paddingAngle={5}
+                              dataKey="value"
+                            >
+                              {projectStatusData.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={entry.color} />
                               ))}
-                            </Bar>
-                          </BarChart>
+                            </Pie>
+                            <Tooltip />
+                            <Legend verticalAlign="bottom" height={36}/>
+                          </PieChart>
                         </ResponsiveContainer>
                       </div>
                     </div>
@@ -1869,6 +1914,7 @@ export default function App() {
                     ...(selectedProject?.type === 'RD' ? [
                       { id: 'BACKLOG', label: 'Backlog', icon: Layers },
                       { id: 'TASKS', label: 'Scrum Board', icon: Layers },
+                      { id: 'RETRO', label: 'Retro', icon: History },
                     ] : [
                       { id: 'LIBRARY', label: 'Library Data', icon: BookOpen },
                       { id: 'ROADMAP', label: 'Roadmap', icon: Calendar },
@@ -2388,6 +2434,7 @@ export default function App() {
                         tasks={tasks} 
                         raidItems={raidItems}
                         projectFiles={projectFiles}
+                        resources={resources}
                         projectId={selectedProjectId || ''}
                         onTaskUpdate={handleTaskUpdate}
                         onAddTask={handleAddTask}
@@ -2746,6 +2793,15 @@ export default function App() {
                     onDeleteFile={handleDeleteProjectFile}
                   />
                 )}
+
+                {activeTab === 'RETRO' && (
+                  <RetrospectiveView 
+                    sprints={sprints}
+                    retrospectives={retrospectives}
+                    onSaveRetro={handleSaveRetro}
+                    onDeleteRetro={handleDeleteRetro}
+                  />
+                )}
               </div>
             </motion.div>
           )}
@@ -3039,6 +3095,7 @@ export default function App() {
           raidItems={raidItems}
           resources={resources}
           isOpen={!!selectedTaskId}
+          currentUser={user}
           onClose={() => setSelectedTaskId(null)}
           onUpdate={handleTaskUpdate}
         />

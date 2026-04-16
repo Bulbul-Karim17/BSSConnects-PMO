@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Task, Phase, ProjectFile, RAIDItem } from '../types';
+import { Task, Phase, ProjectFile, RAIDItem, Resource } from '../types';
 import { 
   ChevronDown, 
   ChevronRight, 
@@ -23,6 +23,7 @@ interface WBSViewProps {
   tasks: Task[];
   raidItems: RAIDItem[];
   projectFiles: ProjectFile[];
+  resources: Resource[];
   onTaskUpdate: (taskId: string, updates: any) => void;
   onAddTask: (projectId: string, status: string, parentId?: string, phase?: string, workstream?: string) => void;
   onTaskDelete: (taskId: string) => void;
@@ -35,6 +36,7 @@ export const WBSView: React.FC<WBSViewProps> = ({
   tasks, 
   raidItems,
   projectFiles,
+  resources,
   onTaskUpdate, 
   onAddTask,
   onTaskDelete,
@@ -239,12 +241,12 @@ export const WBSView: React.FC<WBSViewProps> = ({
                         <span className="text-[10px] font-bold text-slate-500">{progress}%</span>
                       </div>
                     </td>
-                    <td className="p-4"></td>
-                    <td className="p-4"></td>
-                    <td className="p-4"></td>
-                    <td className="p-4"></td>
-                    <td className="p-4"></td>
-                    <td className="p-4"></td>
+                    <td className="p-4 border-r border-slate-200/50"></td>
+                    <td className="p-4 border-r border-slate-200/50"></td>
+                    <td className="p-4 border-r border-slate-200/50"></td>
+                    <td className="p-4 border-r border-slate-200/50"></td>
+                    <td className="p-4 border-r border-slate-200/50"></td>
+                    <td className="p-4 border-r border-slate-200/50"></td>
                     <td className="p-4">
                       <button 
                         type="button"
@@ -357,7 +359,24 @@ export const WBSView: React.FC<WBSViewProps> = ({
                                 <option value="BLOCKED">BLOCKED</option>
                               </select>
                             </td>
-                            <td className="p-4">
+                            <td className="p-4 border-r border-slate-100">
+                              <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center text-[7px] font-bold text-slate-500">
+                                  {(activity.owner || 'U').charAt(0)}
+                                </div>
+                                <select 
+                                  value={activity.owner || ''}
+                                  onChange={(e) => onTaskUpdate(activity.id, { owner: e.target.value })}
+                                  className="w-full bg-transparent border-none focus:ring-0 p-0 text-slate-600 cursor-pointer"
+                                >
+                                  <option value="">Unassigned</option>
+                                  {resources.map(res => (
+                                    <option key={res.id} value={res.name}>{res.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </td>
+                            <td className="p-4 border-r border-slate-100">
                               <input 
                                 type="date"
                                 value={activity.endDate || ''}
@@ -365,7 +384,7 @@ export const WBSView: React.FC<WBSViewProps> = ({
                                 className="w-full bg-transparent border-none focus:ring-0 p-0 text-slate-600"
                               />
                             </td>
-                            <td className="p-4 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => onTaskClick(activity.id)}>
+                            <td className="p-4 border-r border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => onTaskClick(activity.id)}>
                               <div className="flex flex-wrap gap-1">
                                 {activity.dependencies?.map(depId => {
                                   const depTask = tasks.find(t => t.id === depId);
@@ -402,7 +421,7 @@ export const WBSView: React.FC<WBSViewProps> = ({
                                 )}
                               </div>
                             </td>
-                            <td className="p-4">
+                            <td className="p-4 border-r border-slate-100">
                               <div className="flex items-center gap-2 group/comment">
                                 <MessageSquare className="w-3.5 h-3.5 text-slate-300" />
                                 <input 
@@ -414,7 +433,7 @@ export const WBSView: React.FC<WBSViewProps> = ({
                                 />
                               </div>
                             </td>
-                            <td className="p-4">
+                            <td className="p-4 border-r border-slate-100">
                               <div className="flex items-center gap-1 min-h-[24px]">
                                 {files.length > 0 ? (
                                   <div className="flex -space-x-2 overflow-hidden">
@@ -532,12 +551,16 @@ export const WBSView: React.FC<WBSViewProps> = ({
                                         <div className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center text-[7px] font-bold text-slate-500">
                                           {sub.owner.charAt(0)}
                                         </div>
-                                        <input 
-                                          type="text"
-                                          value={sub.owner}
+                                        <select 
+                                          value={sub.owner || ''}
                                           onChange={(e) => onTaskUpdate(sub.id, { owner: e.target.value })}
-                                          className="w-full bg-transparent border-none focus:ring-0 p-0 text-slate-500"
-                                        />
+                                          className="w-full bg-transparent border-none focus:ring-0 p-0 text-slate-500 cursor-pointer"
+                                        >
+                                          <option value="">Unassigned</option>
+                                          {resources.map(res => (
+                                            <option key={res.id} value={res.name}>{res.name}</option>
+                                          ))}
+                                        </select>
                                       </div>
                                     </td>
                                     <td className="p-4 border-r border-slate-100/50">

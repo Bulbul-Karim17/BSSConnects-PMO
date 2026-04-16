@@ -36,6 +36,13 @@ export interface Project {
   approverName?: string;
 }
 
+export interface TaskComment {
+  id: string;
+  text: string;
+  author: string;
+  date: number;
+}
+
 export interface Task {
   id: string;
   projectId: string;
@@ -55,6 +62,7 @@ export interface Task {
   sprintId?: string; // For Agile
   parentId?: string; // For WBS hierarchy (3 layers)
   comments?: string;
+  commentsList?: TaskComment[];
   momDetails?: string; // Minutes of Meeting details
   createdAt?: number;
   updatedAt?: number;
@@ -68,6 +76,19 @@ export interface Sprint {
   endDate: string;
   status: 'PLANNED' | 'ACTIVE' | 'COMPLETED';
   goal?: string;
+  retrospectiveId?: string;
+}
+
+export interface Retrospective {
+  id: string;
+  projectId: string;
+  sprintId: string;
+  startDoing: string[];
+  stopDoing: string[];
+  keepDoing: string[];
+  summaryAction: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface RAIDItem {
