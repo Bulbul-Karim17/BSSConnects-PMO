@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Task, Phase, ProjectFile, RAIDItem, Resource } from '../types';
 import { 
   ChevronDown, 
@@ -27,6 +27,7 @@ interface WBSViewProps {
   onTaskUpdate: (taskId: string, updates: any) => void;
   onAddTask: (projectId: string, status: string, parentId?: string, phase?: string, workstream?: string) => void;
   onTaskDelete: (taskId: string) => void;
+  onWorkstreamDelete: (workstream: string) => void;
   onTaskClick: (taskId: string) => void;
   onFileUpload: (taskId: string) => void;
   projectId: string;
@@ -40,6 +41,7 @@ export const WBSView: React.FC<WBSViewProps> = ({
   onTaskUpdate, 
   onAddTask,
   onTaskDelete,
+  onWorkstreamDelete,
   onTaskClick,
   onFileUpload,
   projectId
@@ -47,6 +49,57 @@ export const WBSView: React.FC<WBSViewProps> = ({
   const [expandedWorkstreams, setExpandedWorkstreams] = useState<Record<string, boolean>>({});
   const [expandedActivities, setExpandedActivities] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Column Resizing Logic
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
+    workstream: 160,
+    activity: 200,
+    details: 400,
+    status: 120,
+    resource: 140,
+    date: 120,
+    deps: 180,
+    update: 250,
+    assets: 100,
+    actions: 100
+  });
+
+  const resizingColumn = useRef<{ id: string; startX: number; startWidth: number } | null>(null);
+
+  useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (!resizingColumn.current) return;
+      const { id, startX, startWidth } = resizingColumn.current;
+      const delta = e.clientX - startX;
+      setColumnWidths(prev => ({
+        ...prev,
+        [id]: Math.max(80, startWidth + delta)
+      }));
+    };
+
+    const handleGlobalMouseUp = () => {
+      resizingColumn.current = null;
+    };
+
+    document.addEventListener('mousemove', handleGlobalMouseMove);
+    document.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleGlobalMouseMove);
+      document.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, []);
+
+  const handleResizeStart = (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    resizingColumn.current = { id, startX: e.clientX, startWidth: columnWidths[id] };
+  };
+
+  const Resizer = ({ id }: { id: string }) => (
+    <div 
+      onMouseDown={(e) => handleResizeStart(id, e)}
+      className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 transition-colors z-20 group-hover:bg-slate-200"
+    />
+  );
 
   const calculateProgress = (taskIds: string[]) => {
     if (taskIds.length === 0) return 0;
@@ -176,20 +229,50 @@ export const WBSView: React.FC<WBSViewProps> = ({
         </div>
       </div>
 
-      <div className="overflow-x-auto bg-white rounded-2xl border border-slate-200 shadow-sm">
-        <table className="w-full border-collapse text-left table-fixed">
+      <div className="overflow-x-auto bg-white rounded-2xl border border-slate-200 shadow-sm scrollbar-thin scrollbar-thumb-slate-200">
+        <table className="border-collapse text-left table-fixed" style={{ width: Object.values(columnWidths).reduce((a, b) => a + b, 0) }}>
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-[200px]">Workstream</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-[250px]">Activity</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-[250px]">Sub-activity</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-[120px]">Status</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-[140px]">Owner</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-[120px]">Deadline</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-[150px]">Dependencies</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-[200px]">Comments</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-[100px]">Files</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-[120px]">Actions</th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest relative group" style={{ width: columnWidths.workstream }}>
+                Workstream
+                <Resizer id="workstream" />
+              </th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest relative group" style={{ width: columnWidths.activity }}>
+                Activity
+                <Resizer id="activity" />
+              </th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest relative group" style={{ width: columnWidths.details }}>
+                Sub-activity / Details
+                <Resizer id="details" />
+              </th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest relative group" style={{ width: columnWidths.status }}>
+                Status
+                <Resizer id="status" />
+              </th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest relative group" style={{ width: columnWidths.resource }}>
+                Resource
+                <Resizer id="resource" />
+              </th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest relative group" style={{ width: columnWidths.date }}>
+                Due Date
+                <Resizer id="date" />
+              </th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest relative group" style={{ width: columnWidths.deps }}>
+                Dependencies
+                <Resizer id="deps" />
+              </th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest relative group" style={{ width: columnWidths.update }}>
+                Latest Update
+                <Resizer id="update" />
+              </th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest relative group" style={{ width: columnWidths.assets }}>
+                Assets
+                <Resizer id="assets" />
+              </th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest relative group text-right" style={{ width: columnWidths.actions }}>
+                Actions
+                <Resizer id="actions" />
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-xs">
@@ -232,35 +315,47 @@ export const WBSView: React.FC<WBSViewProps> = ({
                     </td>
                     <td className="p-4" colSpan={2}>
                       <div className="flex items-center gap-3">
-                        <div className="flex-grow h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                        <div className="flex-grow h-1.5 bg-slate-200 rounded-full overflow-hidden max-w-[150px]">
                           <div 
-                            className="h-full bg-blue-500 transition-all duration-500" 
+                            className="h-full bg-blue-500 transition-all duration-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
                             style={{ width: `${progress}%` }}
                           />
                         </div>
-                        <span className="text-[10px] font-bold text-slate-500">{progress}%</span>
+                        <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">{progress}%</span>
                       </div>
                     </td>
-                    <td className="p-4 border-r border-slate-200/50"></td>
-                    <td className="p-4 border-r border-slate-200/50"></td>
-                    <td className="p-4 border-r border-slate-200/50"></td>
-                    <td className="p-4 border-r border-slate-200/50"></td>
-                    <td className="p-4 border-r border-slate-200/50"></td>
-                    <td className="p-4 border-r border-slate-200/50"></td>
+                    <td className="p-4 border-r border-slate-200/50 text-slate-300 italic text-[10px]" colSpan={6}>
+                      Workstream Progress & Overview
+                    </td>
                     <td className="p-4">
-                      <button 
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!projectId) return;
-                          onAddTask(projectId, 'TODO', undefined, '', wsName);
-                          expandWorkstream(wsName);
-                        }}
-                        className="flex items-center gap-1.5 px-2 py-1 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-700 transition-all shadow-sm"
-                      >
-                        <Plus className="w-3 h-3" />
-                        Add Activity
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button 
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!projectId) return;
+                            onAddTask(projectId, 'TODO', undefined, '', wsName);
+                            expandWorkstream(wsName);
+                          }}
+                          className="flex items-center gap-1.5 px-2 py-1 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-700 transition-all shadow-sm"
+                        >
+                          <Plus className="w-3 h-3" />
+                          Add Activity
+                        </button>
+                        {wsName !== 'General' && (
+                          <button 
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onWorkstreamDelete(wsName);
+                            }}
+                            className="p-1.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-all shadow-sm border border-red-100"
+                            title="Delete Workstream"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
 
@@ -292,47 +387,60 @@ export const WBSView: React.FC<WBSViewProps> = ({
                                 />
                               </div>
                             </td>
-                            <td className="p-4 cursor-pointer border-r border-slate-100" onClick={() => toggleActivity(activity.id)}>
+                            <td className="p-4 cursor-pointer border-r border-slate-100" colSpan={2} onClick={() => toggleActivity(activity.id)}>
                               <div className="flex flex-col gap-2">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-start gap-3">
                                   <button 
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       toggleActivity(activity.id);
                                     }}
-                                    className="p-1.5 hover:bg-white rounded-lg transition-all shadow-sm border border-transparent hover:border-slate-200"
+                                    className={cn(
+                                      "p-1.5 rounded-lg transition-all shadow-sm border mt-0.5",
+                                      isActivityExpanded ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-400 border-slate-200 hover:border-slate-300"
+                                    )}
                                   >
                                     {isActivityExpanded ? 
-                                      <ChevronDown className="w-4 h-4 text-blue-600" /> : 
-                                      <ChevronRight className="w-4 h-4 text-slate-400" />
+                                      <ChevronDown className="w-3.5 h-3.5" /> : 
+                                      <ChevronRight className="w-3.5 h-3.5" />
                                     }
                                   </button>
-                                  <div className="flex-grow flex items-center gap-2">
-                                    <input 
-                                      type="text"
-                                      value={activity.title}
-                                      onClick={(e) => e.stopPropagation()}
-                                      onChange={(e) => onTaskUpdate(activity.id, { title: e.target.value })}
-                                      className={cn(
-                                        "w-full bg-transparent border-none focus:ring-0 p-0 font-semibold text-slate-700",
-                                        depStatus.isBlocked && "text-red-700",
-                                        activity.status === 'DONE' && "text-emerald-700 line-through opacity-60"
+                                  <div className="flex-grow min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <input 
+                                        type="text"
+                                        value={activity.title}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => onTaskUpdate(activity.id, { title: e.target.value })}
+                                        className={cn(
+                                          "w-full bg-transparent border-none focus:ring-0 p-0 font-bold text-slate-900 text-[13px] placeholder:text-slate-300",
+                                          activity.status === 'DONE' && "text-emerald-700 line-through opacity-60"
+                                        )}
+                                      />
+                                      {depStatus.isBlocked && (
+                                        <div className="flex items-center gap-1 bg-red-50 px-1.5 py-0.5 rounded border border-red-100 animate-pulse shrink-0">
+                                          <AlertCircle className="w-3 h-3 text-red-500" />
+                                          <span className="text-[9px] font-black text-red-600 uppercase">Blocked</span>
+                                        </div>
                                       )}
+                                    </div>
+                                    <textarea 
+                                      value={activity.description || ''}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={(e) => onTaskUpdate(activity.id, { description: e.target.value })}
+                                      placeholder="Activity context..."
+                                      rows={2}
+                                      className="w-full bg-transparent border-none focus:ring-0 p-0 text-[11px] text-slate-500 leading-normal resize-none placeholder:text-slate-300"
                                     />
-                                    {depStatus.isBlocked && (
-                                      <span title={`Blocked by: ${depStatus.blockedBy.map(t => t.title).join(', ')}`}>
-                                        <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                                      </span>
-                                    )}
                                   </div>
                                 </div>
-                                <div className="pl-9 pr-4">
+                                <div className="pl-11 pr-4">
                                   <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
                                     <div 
                                       className={cn(
-                                        "h-full transition-all duration-500",
-                                        activityProgress === 100 ? "bg-emerald-500" : "bg-blue-400"
+                                        "h-full transition-all duration-700 ease-out",
+                                        activityProgress === 100 ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" : "bg-blue-500"
                                       )}
                                       style={{ width: `${activityProgress}%` }}
                                     />
@@ -340,7 +448,6 @@ export const WBSView: React.FC<WBSViewProps> = ({
                                 </div>
                               </div>
                             </td>
-                            <td className="p-4 border-r border-slate-100"></td>
                             <td className="p-4 border-r border-slate-100">
                               <select
                                 value={activity.status}
@@ -422,15 +529,28 @@ export const WBSView: React.FC<WBSViewProps> = ({
                               </div>
                             </td>
                             <td className="p-4 border-r border-slate-100">
-                              <div className="flex items-center gap-2 group/comment">
-                                <MessageSquare className="w-3.5 h-3.5 text-slate-300" />
-                                <input 
-                                  type="text"
-                                  value={activity.comments || ''}
-                                  onChange={(e) => onTaskUpdate(activity.id, { comments: e.target.value })}
-                                  placeholder="Add comment..."
-                                  className="w-full bg-transparent border-none focus:ring-0 p-0 text-slate-500 placeholder:text-slate-300"
-                                />
+                              <div className="flex flex-col gap-1">
+                                {activity.commentsList && activity.commentsList.length > 0 ? (
+                                  <div className="space-y-1">
+                                    <p className="text-[10px] text-slate-600 font-medium line-clamp-2 leading-tight">
+                                      {activity.commentsList[activity.commentsList.length - 1].text}
+                                    </p>
+                                    <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">
+                                      — {activity.commentsList[activity.commentsList.length - 1].author}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2 group/comment">
+                                    <MessageSquare className="w-3.5 h-3.5 text-slate-300" />
+                                    <input 
+                                      type="text"
+                                      value={activity.comments || ''}
+                                      onChange={(e) => onTaskUpdate(activity.id, { comments: e.target.value })}
+                                      placeholder="Add note..."
+                                      className="w-full bg-transparent border-none focus:ring-0 p-0 text-[10px] text-slate-500 placeholder:text-slate-300"
+                                    />
+                                  </div>
+                                )}
                               </div>
                             </td>
                             <td className="p-4 border-r border-slate-100">
@@ -509,23 +629,32 @@ export const WBSView: React.FC<WBSViewProps> = ({
                                     <td className="p-4 text-slate-300 border-r border-slate-100/50 italic">{wsName}</td>
                                     <td className="p-4 text-slate-400 border-r border-slate-100/50 italic">{activity.title}</td>
                                     <td className="p-4 border-r border-slate-100/50">
-                                      <div className="flex items-center gap-2 pl-4">
-                                        <div className="w-2 h-2 rounded-full bg-slate-300" />
-                                        <input 
-                                          type="text"
-                                          value={sub.title}
-                                          onChange={(e) => onTaskUpdate(sub.id, { title: e.target.value })}
-                                          className={cn(
-                                            "w-full bg-transparent border-none focus:ring-0 p-0 text-slate-600",
-                                            subDepStatus.isBlocked && "text-red-700 font-medium",
-                                            sub.status === 'DONE' && "text-emerald-700 line-through opacity-60"
+                                      <div className="flex flex-col gap-1 pr-2">
+                                        <div className="flex items-start gap-2">
+                                          <div className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0 mt-2" />
+                                          <div className="flex-grow min-w-0">
+                                            <input 
+                                              type="text"
+                                              value={sub.title}
+                                              onChange={(e) => onTaskUpdate(sub.id, { title: e.target.value })}
+                                              className={cn(
+                                                "w-full bg-transparent border-none focus:ring-0 p-0 text-slate-800 font-bold text-[12px] leading-tight",
+                                                sub.status === 'DONE' && "text-emerald-700 line-through opacity-60"
+                                              )}
+                                            />
+                                            <textarea 
+                                              value={sub.description || ''}
+                                              onClick={(e) => e.stopPropagation()}
+                                              onChange={(e) => onTaskUpdate(sub.id, { description: e.target.value })}
+                                              placeholder="Sub-activity details..."
+                                              rows={2}
+                                              className="w-full bg-transparent border-none focus:ring-0 p-0 text-[10px] text-slate-500 leading-normal resize-none placeholder:text-slate-300"
+                                            />
+                                          </div>
+                                          {subDepStatus.isBlocked && (
+                                            <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
                                           )}
-                                        />
-                                        {subDepStatus.isBlocked && (
-                                          <span title={`Blocked by: ${subDepStatus.blockedBy.map(t => t.title).join(', ')}`}>
-                                            <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0" />
-                                          </span>
-                                        )}
+                                        </div>
                                       </div>
                                     </td>
                                     <td className="p-4 border-r border-slate-100/50">
@@ -609,15 +738,25 @@ export const WBSView: React.FC<WBSViewProps> = ({
                                       </div>
                                     </td>
                                     <td className="p-4 border-r border-slate-100/50">
-                                      <div className="flex items-center gap-2">
-                                        <MessageSquare className="w-3 h-3 text-slate-200" />
-                                        <input 
-                                          type="text"
-                                          value={sub.comments || ''}
-                                          onChange={(e) => onTaskUpdate(sub.id, { comments: e.target.value })}
-                                          placeholder="Add comment..."
-                                          className="w-full bg-transparent border-none focus:ring-0 p-0 text-slate-400 placeholder:text-slate-200"
-                                        />
+                                      <div className="flex flex-col gap-1">
+                                        {sub.commentsList && sub.commentsList.length > 0 ? (
+                                          <div className="space-y-1">
+                                            <p className="text-[10px] text-slate-600 font-medium line-clamp-2 leading-tight">
+                                              {sub.commentsList[sub.commentsList.length - 1].text}
+                                            </p>
+                                          </div>
+                                        ) : (
+                                          <div className="flex items-center gap-2">
+                                            <MessageSquare className="w-3 h-3 text-slate-200" />
+                                            <input 
+                                              type="text"
+                                              value={sub.comments || ''}
+                                              onChange={(e) => onTaskUpdate(sub.id, { comments: e.target.value })}
+                                              placeholder="Update..."
+                                              className="w-full bg-transparent border-none focus:ring-0 p-0 text-[10px] text-slate-400 placeholder:text-slate-200"
+                                            />
+                                          </div>
+                                        )}
                                       </div>
                                     </td>
                                     <td className="p-4 border-r border-slate-100/50">

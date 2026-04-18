@@ -212,6 +212,23 @@
         "updatedAt": { "type": "number" }
       },
       "required": ["id", "projectId", "title", "description", "priority", "status", "owner", "reportedBy", "reportedDate", "createdAt", "updatedAt"]
+    },
+    "Retrospective": {
+      "title": "Retrospective",
+      "description": "A sprint retrospective evaluation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "sprintId": { "type": "string" },
+        "startDoing": { "type": "array", "items": { "type": "string" } },
+        "stopDoing": { "type": "array", "items": { "type": "string" } },
+        "keepDoing": { "type": "array", "items": { "type": "string" } },
+        "summaryAction": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "projectId", "sprintId", "startDoing", "stopDoing", "keepDoing", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -238,6 +255,10 @@
     "/projects/{projectId}/sprints/{sprintId}": {
       "schema": "Sprint",
       "description": "Sprints associated with an Agile project."
+    },
+    "/projects/{projectId}/retrospectives/{retroId}": {
+      "schema": "Retrospective",
+      "description": "Retrospectives associated with a project."
     },
     "/projects/{projectId}/designDocs/{docId}": {
       "schema": "DesignDoc",

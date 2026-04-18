@@ -36,6 +36,7 @@ import {
   TrendingUp,
   CheckCircle2,
   Clock,
+  Eye,
   AlertCircle,
   Loader2,
   Upload,
@@ -44,8 +45,10 @@ import {
   Check,
   X,
   FileText,
+  FileDown,
   Paperclip,
   File,
+  Link as LinkIcon,
   BookOpen,
   Target,
   ListChecks,
@@ -55,8 +58,9 @@ import {
   Snowflake
 } from 'lucide-react';
 import { cn } from './lib/utils';
-import { motion, AnimatePresence } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from 'recharts';
+import { exportSectionToPDF, exportFullProjectReport, generatePDFPreview, savePDFFromImage } from './lib/pdfExport';
 
 import { initializeApp } from 'firebase/app';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User as FirebaseUser } from 'firebase/auth';
@@ -84,6 +88,8 @@ export default function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [pdfPreviewData, setPdfPreviewData] = useState<string | null>(null);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editingNameValue, setEditingNameValue] = useState('');
   const [projectCategoryFilter, setProjectCategoryFilter] = useState<'RD' | 'DELIVERY' | null>(null);
@@ -268,6 +274,41 @@ export default function App() {
     } catch (error) {
       console.error("Login failed:", error);
     }
+  };
+
+  const handlePreviewPDF = async () => {
+    if (!selectedProject) return;
+    setIsExporting(true);
+    try {
+      const preview = await generatePDFPreview('project-section-content');
+      if (preview) {
+        setPdfPreviewData(preview);
+      }
+    } catch (err) {
+      console.error("Preview generation failed:", err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleDirectExportPDF = async () => {
+    if (!selectedProject) return;
+    setIsExporting(true);
+    try {
+      const sectionName = activeTab.charAt(0) + activeTab.slice(1).toLowerCase();
+      await exportSectionToPDF('project-section-content', `${selectedProject.name}_${sectionName}`);
+    } catch (err) {
+      console.error("Direct export failed:", err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const finalizePDFExport = () => {
+    if (!selectedProject || !pdfPreviewData) return;
+    const sectionName = activeTab.charAt(0) + activeTab.slice(1).toLowerCase();
+    savePDFFromImage(pdfPreviewData, `${selectedProject.name}_${sectionName}`);
+    setPdfPreviewData(null);
   };
 
   const handleUpdateProjectName = async () => {
@@ -1054,6 +1095,32 @@ export default function App() {
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } catch (error) {
           handleFirestoreError(error, OperationType.DELETE, `projects/${pId}/tasks/${taskId}`);
+        }
+      }
+    });
+  };
+
+  const handleWorkstreamDelete = (workstream: string) => {
+    if (workstream === 'General') return;
+    const wsTasks = tasks.filter(t => (t.workstream || 'General') === workstream);
+    
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Workstream?',
+      message: `Are you sure you want to delete the "${workstream}" workstream and all its ${wsTasks.length} activities? This action cannot be undone.`,
+      type: 'danger',
+      confirmText: 'Delete Workstream',
+      onConfirm: async () => {
+        if (!selectedProjectId || !user) return;
+        try {
+          const batch = writeBatch(db);
+          wsTasks.forEach(t => {
+            batch.delete(doc(db, 'projects', selectedProjectId, 'tasks', t.id));
+          });
+          await batch.commit();
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `projects/${selectedProjectId}/workstream/${workstream}`);
         }
       }
     });
@@ -1904,6 +1971,36 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               className="space-y-6"
             >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-4">
+                  <button 
+                    onClick={() => setSelectedProjectId(null)}
+                    className="p-2 hover:bg-white rounded-lg text-slate-500 transition-colors border border-transparent hover:border-slate-200"
+                  >
+                    <ArrowLeft className="w-5 h-5" />
+                  </button>
+                  <h2 className="text-xl font-bold text-slate-900 line-clamp-1">{selectedProject?.name}</h2>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={handlePreviewPDF}
+                    disabled={isExporting}
+                    className="flex items-center gap-2 bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
+                  >
+                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4 text-slate-400" />}
+                    Preview Report
+                  </button>
+                  <button 
+                    onClick={handleDirectExportPDF}
+                    disabled={isExporting}
+                    className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50"
+                  >
+                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+                    Export report PDF
+                  </button>
+                </div>
+              </div>
+
               {/* Project Header Tabs */}
               <div className="flex flex-col gap-2">
                 {/* Row 1 */}
@@ -1965,7 +2062,7 @@ export default function App() {
               </div>
 
               {/* Tab Content */}
-              <div className="mt-6">
+              <div className="mt-6 bg-white rounded-2xl p-4 border border-slate-50 shadow-sm" id="project-section-content">
                 {activeTab === 'CHARTER' && selectedProject && (
                   <ProjectCharter 
                     project={selectedProject} 
@@ -2257,7 +2354,20 @@ export default function App() {
                                       </div>
                                       <div className="flex-grow">
                                         <p className={cn("text-sm font-semibold text-slate-900", task.status === 'DONE' && "line-through opacity-50")}>{task.title}</p>
-                                        <p className="text-xs text-slate-500 line-clamp-1">{task.description || 'No description'}</p>
+                                        <div className="flex items-center gap-3">
+                                          <p className="text-xs text-slate-500 line-clamp-1">{task.description || 'No description'}</p>
+                                          {(task.dependencies?.length || 0) > 0 && (
+                                            <div className={cn(
+                                              "flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold",
+                                              task.dependencies?.some(depId => tasks.find(t => t.id === depId)?.status !== 'DONE')
+                                                ? "bg-amber-50 text-amber-600 border border-amber-100"
+                                                : "bg-emerald-50 text-emerald-600 border border-emerald-100"
+                                            )}>
+                                              <LinkIcon className="w-2.5 h-2.5" />
+                                              {task.dependencies?.length}
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
                                     <div className="flex items-center gap-4">
@@ -2346,6 +2456,22 @@ export default function App() {
                                     placeholder="Add description..."
                                     rows={1}
                                   />
+                                  {(task.dependencies?.length || 0) > 0 && (
+                                    <div className="flex pt-1">
+                                      <div className={cn(
+                                        "flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold",
+                                        task.dependencies?.some(depId => tasks.find(t => t.id === depId)?.status !== 'DONE')
+                                          ? "bg-amber-50 text-amber-600 border border-amber-100"
+                                          : "bg-emerald-50 text-emerald-600 border border-emerald-100"
+                                      )}>
+                                        <LinkIcon className="w-2.5 h-2.5" />
+                                        {task.dependencies?.length} Dependencies
+                                        {task.dependencies?.some(depId => tasks.find(t => t.id === depId)?.status !== 'DONE') && (
+                                          <AlertCircle className="w-2.5 h-2.5 ml-0.5" />
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex items-center gap-3">
@@ -2439,6 +2565,7 @@ export default function App() {
                         onTaskUpdate={handleTaskUpdate}
                         onAddTask={handleAddTask}
                         onTaskDelete={handleTaskDelete}
+                        onWorkstreamDelete={handleWorkstreamDelete}
                         onTaskClick={(taskId) => setSelectedTaskId(taskId)}
                         onFileUpload={handleWBSFileUpload}
                       />
@@ -2530,6 +2657,7 @@ export default function App() {
                               <th className="pb-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Workstream</th>
                               <th className="pb-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Owner</th>
                               <th className="pb-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Due Date</th>
+                              <th className="pb-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
@@ -2574,6 +2702,18 @@ export default function App() {
                                 </td>
                                 <td className="py-4">
                                   <p className="text-xs font-bold text-slate-700">{task.endDate || 'TBD'}</p>
+                                </td>
+                                <td className="py-4 text-right">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleTaskDelete(task.id);
+                                    }}
+                                    className="p-2 hover:bg-red-50 rounded-lg text-slate-300 hover:text-red-500 transition-all"
+                                    title="Delete Action Point"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
                                 </td>
                               </tr>
                             ))}
@@ -3098,6 +3238,7 @@ export default function App() {
           currentUser={user}
           onClose={() => setSelectedTaskId(null)}
           onUpdate={handleTaskUpdate}
+          onTaskClick={(taskId) => setSelectedTaskId(taskId)}
         />
       )}
 
@@ -3445,6 +3586,49 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* PDF Preview Modal */}
+      {pdfPreviewData && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-8 bg-slate-900/80 backdrop-blur-md">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-white rounded-3xl shadow-2xl max-w-5xl w-full h-[90vh] flex flex-col overflow-hidden"
+          >
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Review PDF Report</h3>
+                <p className="text-sm text-slate-500">Preview the generated report before downloading.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setPdfPreviewData(null)}
+                  className="px-6 py-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+                >
+                  Discard
+                </button>
+                <button 
+                  onClick={finalizePDFExport}
+                  className="px-8 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 flex items-center gap-2"
+                >
+                  <FileDown className="w-4 h-4" />
+                  Confirm & Export
+                </button>
+              </div>
+            </div>
+            <div className="flex-grow overflow-auto bg-slate-100 p-8 flex justify-center">
+              <div className="bg-white shadow-2xl p-4 min-w-[300px] max-w-full">
+                <img 
+                  src={pdfPreviewData} 
+                  alt="PDF Preview" 
+                  className="w-full h-auto border border-slate-200"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            </div>
           </motion.div>
         </div>
       )}

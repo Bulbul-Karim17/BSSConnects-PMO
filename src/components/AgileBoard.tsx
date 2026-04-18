@@ -1,6 +1,6 @@
 import React from 'react';
 import { Task, Resource } from '../types';
-import { Plus, MoreVertical, Clock, User, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Plus, MoreVertical, Clock, User, CheckCircle2, AlertCircle, Link as LinkIcon } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 
@@ -77,10 +77,28 @@ export const AgileBoard: React.FC<AgileBoardProps> = ({ tasks, resources, onTask
                     value={task.description}
                     onChange={(e) => onTaskUpdate(task.id, { description: e.target.value })}
                     onClick={(e) => e.stopPropagation()}
-                    className="w-full text-xs text-slate-500 mb-4 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors resize-none"
+                    className="w-full text-xs text-slate-500 mb-2 bg-transparent border-none focus:ring-0 p-0 hover:bg-slate-100/50 rounded transition-colors resize-none"
                     placeholder="Add description..."
                     rows={2}
                   />
+
+                  {/* Dependencies Indicator */}
+                  {(task.dependencies?.length || 0) > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      <div className={cn(
+                        "flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold",
+                        task.dependencies?.some(depId => tasks.find(t => t.id === depId)?.status !== 'DONE')
+                          ? "bg-amber-50 text-amber-600 border border-amber-100"
+                          : "bg-emerald-50 text-emerald-600 border border-emerald-100"
+                      )}>
+                        <LinkIcon className="w-2.5 h-2.5" />
+                        {task.dependencies?.length}
+                        {task.dependencies?.some(depId => tasks.find(t => t.id === depId)?.status !== 'DONE') && (
+                          <AlertCircle className="w-2.5 h-2.5 ml-0.5" />
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-between pt-3 border-t border-slate-50">
                     <div className="flex items-center gap-1.5">

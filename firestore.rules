@@ -218,6 +218,19 @@ service cloud.firestore {
              data.updatedAt is number;
     }
 
+    function isValidRetrospective(data) {
+      return data.keys().hasAll(['id', 'projectId', 'sprintId', 'startDoing', 'stopDoing', 'keepDoing', 'createdAt', 'updatedAt']) &&
+             data.id is string &&
+             data.projectId is string &&
+             data.sprintId is string &&
+             data.startDoing is list &&
+             data.stopDoing is list &&
+             data.keepDoing is list &&
+             (!('summaryAction' in data) || (data.summaryAction is string && data.summaryAction.size() < 5000)) &&
+             data.createdAt is number &&
+             data.updatedAt is number;
+    }
+
     function isValidResource(data) {
       return data.keys().hasAll(['id', 'name', 'role', 'ownerId', 'createdAt', 'updatedAt']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
@@ -293,6 +306,13 @@ service cloud.firestore {
         allow read: if isProjectOwner(projectId);
         allow create: if isProjectOwner(projectId) && isValidSprint(request.resource.data);
         allow update: if isProjectOwner(projectId) && isValidSprint(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+
+      match /retrospectives/{retroId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId) && isValidRetrospective(request.resource.data);
+        allow update: if isProjectOwner(projectId) && isValidRetrospective(request.resource.data);
         allow delete: if isProjectOwner(projectId);
       }
 

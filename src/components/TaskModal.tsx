@@ -14,9 +14,10 @@ interface TaskModalProps {
   currentUser: FirebaseUser | null;
   onClose: () => void;
   onUpdate: (taskId: string, updates: Partial<Task>) => void;
+  onTaskClick?: (taskId: string) => void;
 }
 
-export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, raidItems, resources, isOpen, currentUser, onClose, onUpdate }) => {
+export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, raidItems, resources, isOpen, currentUser, onClose, onUpdate, onTaskClick }) => {
   const [newComment, setNewComment] = useState('');
   if (!isOpen) return null;
 
@@ -274,16 +275,38 @@ export const TaskModal: React.FC<TaskModalProps> = ({ task, allTasks, raidItems,
               <div className="space-y-2">
                 {dependencies.map(depId => {
                   const depTask = allTasks.find(t => t.id === depId);
+                  const isUnmet = depTask && depTask.status !== 'DONE';
+                  
                   return (
-                    <div key={depId} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl group hover:bg-slate-100 transition-all">
+                    <div 
+                      key={depId} 
+                      onClick={() => depTask && onTaskClick?.(depId)}
+                      className={cn(
+                        "flex items-center justify-between p-3 rounded-xl group transition-all cursor-pointer",
+                        isUnmet ? "bg-amber-50 border border-amber-100 hover:bg-amber-100" : "bg-slate-50 border border-slate-100 hover:bg-slate-100"
+                      )}
+                    >
                       <div className="flex items-center gap-3 overflow-hidden">
-                        <div className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
-                        <span className="text-sm text-slate-700 truncate font-medium">
-                          {depTask ? depTask.title : 'Unknown Task'}
-                        </span>
+                        <div className={cn(
+                          "w-2 h-2 rounded-full shrink-0",
+                          isUnmet ? "bg-amber-400" : "bg-emerald-400"
+                        )} />
+                        <div>
+                          <p className="text-sm text-slate-700 truncate font-medium">
+                            {depTask ? depTask.title : 'Unknown Task'}
+                          </p>
+                          {isUnmet && (
+                            <p className="text-[10px] text-amber-600 font-bold uppercase tracking-wider">
+                              Unmet: {depTask?.status}
+                            </p>
+                          )}
+                        </div>
                       </div>
                       <button
-                        onClick={() => handleRemoveDependency(depId)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveDependency(depId);
+                        }}
                         className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
                       >
                         <Trash2 className="w-4 h-4" />
