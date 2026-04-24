@@ -36,6 +36,26 @@ export interface Project {
   approverName?: string;
 }
 
+export type UserRole = 'ADMIN' | 'PM' | 'OWNER' | 'DEVELOPER' | 'STAKEHOLDER';
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  displayName?: string;
+  role: UserRole;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProjectMember {
+  id: string; // userId_projectId
+  userId: string;
+  projectId: string;
+  role: UserRole;
+  email: string;
+  assignedAt: number;
+}
+
 export interface TaskComment {
   id: string;
   text: string;

@@ -86,14 +86,26 @@ service cloud.firestore {
       return isAuthenticated() &&
         ((request.auth.token.email == "ahmed.n.abdelkarim17@gmail.com" && request.auth.token.email_verified == true) ||
          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN'));
     }
 
-    function isProjectOwner(projectId) {
-      return isAuthenticated() && 
-        (isAdmin() || 
-         (exists(/databases/$(database)/documents/projects/$(projectId)) && get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid) ||
-         (getAfter(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid));
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isProjectManager(projectId) {
+      return isAdmin() || 
+             (exists(/databases/$(database)/documents/projects/$(projectId)) && get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid) ||
+             (exists(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId)) && 
+              get(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId)).data.role in ['ADMIN', 'PM']);
+    }
+
+    function hasProjectAccess(projectId) {
+      return isAuthenticated() && (
+        isAdmin() || 
+        (exists(/databases/$(database)/documents/projects/$(projectId)) && get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid) ||
+        exists(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId))
+      );
     }
 
     function isValidProject(data) {
@@ -249,11 +261,14 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
-      allow create: if isAuthenticated() && isOwner(userId) && 
-                      request.resource.data.role == 'user';
-      allow update: if isAdmin() || 
-                      (isOwner(userId) && request.resource.data.role == resource.data.role);
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isOwner(userId);
+      allow update: if isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role);
+    }
+
+    match /projectMembers/{memberId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin() || isProjectManager(memberId.split('_')[1]);
     }
 
     match /resources/{resourceId} {
@@ -267,79 +282,71 @@ service cloud.firestore {
     }
 
     match /projects/{projectId} {
-      allow read: if isOwner(resource.data.ownerId) || isAdmin();
+      allow read: if hasProjectAccess(projectId);
       allow create: if isAuthenticated() && isValidProject(request.resource.data);
-      allow update: if (isOwner(resource.data.ownerId) || isAdmin()) && 
-                      isValidProject(request.resource.data) &&
-                      (isAdmin() || request.resource.data.ownerId == resource.data.ownerId);
-      allow delete: if isOwner(resource.data.ownerId) || isAdmin();
+      allow update: if isProjectManager(projectId) && 
+                      isValidProject(request.resource.data);
+      allow delete: if isAdmin() || (exists(/databases/$(database)/documents/projects/$(projectId)) && get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid);
 
       match /tasks/{taskId} {
-        allow read: if isProjectOwner(projectId);
-        allow create: if isProjectOwner(projectId) && isValidTask(request.resource.data);
-        allow update: if isProjectOwner(projectId) && isValidTask(request.resource.data);
-        allow delete: if isProjectOwner(projectId);
+        allow read: if hasProjectAccess(projectId);
+        allow create, update: if (isProjectManager(projectId) || (exists(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId)) && get(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId)).data.role == 'DEVELOPER')) && isValidTask(request.resource.data);
+        allow delete: if isProjectManager(projectId);
       }
 
       match /raidItems/{raidItemId} {
-        allow read: if isProjectOwner(projectId);
-        allow create: if isProjectOwner(projectId) && isValidRAIDItem(request.resource.data);
-        allow update: if isProjectOwner(projectId) && isValidRAIDItem(request.resource.data);
-        allow delete: if isProjectOwner(projectId);
+        allow read: if hasProjectAccess(projectId);
+        allow create, update: if (isProjectManager(projectId) || (exists(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId)) && get(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId)).data.role == 'DEVELOPER')) && isValidRAIDItem(request.resource.data);
+        allow delete: if isProjectManager(projectId);
       }
 
       match /milestones/{milestoneId} {
-        allow read: if isProjectOwner(projectId);
-        allow create: if isProjectOwner(projectId) && isValidMilestone(request.resource.data);
-        allow update: if isProjectOwner(projectId) && isValidMilestone(request.resource.data);
-        allow delete: if isProjectOwner(projectId);
+        allow read: if hasProjectAccess(projectId);
+        allow create, update: if isProjectManager(projectId) && isValidMilestone(request.resource.data);
+        allow delete: if isProjectManager(projectId);
       }
 
       match /phases/{phaseId} {
-        allow read: if isProjectOwner(projectId);
-        allow create: if isProjectOwner(projectId) && isValidPhase(request.resource.data);
-        allow update: if isProjectOwner(projectId) && isValidPhase(request.resource.data);
-        allow delete: if isProjectOwner(projectId);
+        allow read: if hasProjectAccess(projectId);
+        allow create, update: if isProjectManager(projectId) && isValidPhase(request.resource.data);
+        allow delete: if isProjectManager(projectId);
       }
 
       match /sprints/{sprintId} {
-        allow read: if isProjectOwner(projectId);
-        allow create: if isProjectOwner(projectId) && isValidSprint(request.resource.data);
-        allow update: if isProjectOwner(projectId) && isValidSprint(request.resource.data);
-        allow delete: if isProjectOwner(projectId);
+        allow read: if hasProjectAccess(projectId);
+        allow create, update: if isProjectManager(projectId) && isValidSprint(request.resource.data);
+        allow delete: if isProjectManager(projectId);
       }
 
       match /retrospectives/{retroId} {
-        allow read: if isProjectOwner(projectId);
-        allow create: if isProjectOwner(projectId) && isValidRetrospective(request.resource.data);
-        allow update: if isProjectOwner(projectId) && isValidRetrospective(request.resource.data);
-        allow delete: if isProjectOwner(projectId);
+        allow read: if hasProjectAccess(projectId);
+        allow create, update: if isProjectManager(projectId) && isValidRetrospective(request.resource.data);
+        allow delete: if isProjectManager(projectId);
       }
 
       match /designDocs/{docId} {
-        allow read: if isProjectOwner(projectId);
-        allow create, update: if isProjectOwner(projectId) && isValidDesignDoc(request.resource.data);
-        allow delete: if isProjectOwner(projectId);
+        allow read: if hasProjectAccess(projectId);
+        allow create, update: if (isProjectManager(projectId) || (exists(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId)) && get(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId)).data.role in ['DEVELOPER', 'OWNER'])) && isValidDesignDoc(request.resource.data);
+        allow delete: if isProjectManager(projectId);
       }
 
       match /files/{fileId} {
-        allow read: if isProjectOwner(projectId);
-        allow create: if isProjectOwner(projectId) && isValidProjectFile(request.resource.data);
-        allow delete: if isProjectOwner(projectId);
+        allow read: if hasProjectAccess(projectId);
+        allow create: if (isProjectManager(projectId) || (exists(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId)) && get(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId)).data.role in ['DEVELOPER', 'OWNER'])) && isValidProjectFile(request.resource.data);
+        allow delete: if isProjectManager(projectId);
       }
 
       match /changeRequests/{requestId} {
-        allow read: if isProjectOwner(projectId);
-        allow create: if isProjectOwner(projectId) && isValidChangeRequest(request.resource.data);
-        allow update: if isProjectOwner(projectId) && isValidChangeRequest(request.resource.data);
-        allow delete: if isProjectOwner(projectId);
+        allow read: if hasProjectAccess(projectId);
+        allow create: if isProjectManager(projectId) && isValidChangeRequest(request.resource.data);
+        allow update: if isProjectManager(projectId) && isValidChangeRequest(request.resource.data);
+        allow delete: if isProjectManager(projectId);
       }
 
       match /issueLogItems/{itemId} {
-        allow read: if isProjectOwner(projectId);
-        allow create: if isProjectOwner(projectId) && isValidIssueLogItem(request.resource.data);
-        allow update: if isProjectOwner(projectId) && isValidIssueLogItem(request.resource.data);
-        allow delete: if isProjectOwner(projectId);
+        allow read: if hasProjectAccess(projectId);
+        allow create, update: if (isProjectManager(projectId) || (exists(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId)) && get(/databases/$(database)/documents/projectMembers/$(request.auth.uid + '_' + projectId)).data.role == 'DEVELOPER')) && isValidIssueLogItem(request.resource.data);
+        allow delete: if isProjectManager(projectId);
       }
     }
 

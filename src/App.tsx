@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Project, Task, RAIDItem, Milestone, RDPhase, Phase, DesignDoc, ProjectFile, Sprint, Resource, ChangeRequest, IssueLogItem, Retrospective } from './types';
+import { Project, Task, RAIDItem, Milestone, RDPhase, Phase, DesignDoc, ProjectFile, Sprint, Resource, ChangeRequest, IssueLogItem, Retrospective, UserRole, UserProfile, ProjectMember } from './types';
 import { ProjectCard } from './components/ProjectCard';
 import { FileUpload } from './components/FileUpload';
 import { AgileBoard } from './components/AgileBoard';
@@ -11,7 +11,10 @@ import { ChangeRegister } from './components/ChangeRegister';
 import { Roadmap } from './components/Roadmap';
 import { DataStory } from './components/DataStory';
 import { ProjectCharter } from './components/ProjectCharter';
+import { RoleRegister } from './components/RoleRegister';
+import { ProjectMembers } from './components/ProjectMembers';
 import { TaskModal } from './components/TaskModal';
+import { View360 } from './components/View360';
 import { RetrospectiveView } from './components/RetrospectiveView';
 import { 
   LayoutDashboard, 
@@ -34,6 +37,7 @@ import {
   Calendar,
   Share2,
   TrendingUp,
+  Shield,
   CheckCircle2,
   Clock,
   Eye,
@@ -73,11 +77,14 @@ const MOCK_PROJECTS: Project[] = [];
 
 export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [mainView, setMainView] = useState<'DASHBOARD' | 'PROJECTS' | 'CALENDAR' | 'REPORTS' | 'RESOURCES'>('DASHBOARD');
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'CHARTER' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'DATA_STORY' | 'LIBRARY' | 'ISSUE_TRACKER' | 'CHANGES' | 'RETRO'>('OVERVIEW');
+  const [mainView, setMainView] = useState<'DASHBOARD' | 'PROJECTS' | 'CALENDAR' | 'REPORTS' | 'RESOURCES' | 'ROLES' | 'VIEW_360'>('DASHBOARD');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'CHARTER' | 'BACKLOG' | 'TASKS' | 'RAID' | 'ROADMAP' | 'WBS' | 'ACTIVITY' | 'DATA_STORY' | 'LIBRARY' | 'ISSUE_TRACKER' | 'CHANGES' | 'RETRO' | 'MEMBERS'>('OVERVIEW');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [selectedTypeForCreation, setSelectedTypeForCreation] = useState<'RD' | 'DELIVERY' | null>(null);
@@ -144,8 +151,33 @@ export default function App() {
 
   // Auth Listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
+      if (user) {
+        // Fetch or create user profile
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDocFromServer(userRef);
+        
+        if (userSnap.exists()) {
+          setUserProfile(userSnap.data() as UserProfile);
+        } else {
+          // Create default profile for first-time login
+          // The first user ever could be ADMIN, but let's default to STAKEHOLDER or check email
+          const isAdminEmail = user.email === 'ahmed.n.abdelkarim17@gmail.com'; // Admin from runtime
+          const newProfile: UserProfile = {
+            uid: user.uid,
+            email: user.email || '',
+            displayName: user.displayName || '',
+            role: isAdminEmail ? 'ADMIN' : 'STAKEHOLDER',
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          };
+          await setDoc(userRef, newProfile);
+          setUserProfile(newProfile);
+        }
+      } else {
+        setUserProfile(null);
+      }
       setIsAuthReady(true);
     });
     return () => unsubscribe();
@@ -167,12 +199,25 @@ export default function App() {
 
   // Projects Listener
   useEffect(() => {
-    if (!user) {
+    if (!user || !userProfile) {
       setProjects([]);
       return;
     }
 
-    const q = query(collection(db, 'projects'), where('ownerId', '==', user.uid));
+    let q;
+    if (userProfile.role === 'ADMIN') {
+      // Admins see all projects
+      q = query(collection(db, 'projects'));
+    } else if (userProfile.role === 'DEVELOPER' || userProfile.role === 'PM' || userProfile.role === 'OWNER' || userProfile.role === 'STAKEHOLDER') {
+      // For now, filter by ownerId OR if they are in members
+      // Firestore doesn't easily support dynamic OR across collections in one query
+      // So we might need to fetch projects where ownerId OR fetch from projectMembers and then fetch projects.
+      // Easiest for this demo: fetch projects where ownerId and also fetch projectMembers specifically.
+      q = query(collection(db, 'projects'), where('ownerId', '==', user.uid));
+    } else {
+      q = query(collection(db, 'projects'), where('ownerId', '==', user.uid));
+    }
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const projectsData = snapshot.docs.map(doc => doc.data() as Project);
       setProjects(projectsData);
@@ -181,7 +226,32 @@ export default function App() {
     });
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user, userProfile]);
+
+  // Project Members Listener for Developer Access
+  useEffect(() => {
+    if (!user || !userProfile || userProfile.role === 'ADMIN') return;
+
+    if (userProfile.role === 'DEVELOPER') {
+      const mq = query(collection(db, 'projectMembers'), where('userId', '==', user.uid));
+      const unsubscribe = onSnapshot(mq, async (snapshot) => {
+        const memberEntries = snapshot.docs.map(doc => doc.data() as ProjectMember);
+        // If developer is assigned to other projects, fetch them too
+        for (const entry of memberEntries) {
+          const pRef = doc(db, 'projects', entry.projectId);
+          const pSnap = await getDocFromServer(pRef);
+          if (pSnap.exists()) {
+            const proj = pSnap.data() as Project;
+            setProjects(prev => {
+              if (prev.find(p => p.id === proj.id)) return prev;
+              return [...prev, proj];
+            });
+          }
+        }
+      });
+      return () => unsubscribe();
+    }
+  }, [user, userProfile]);
 
   // Resources Listener
   useEffect(() => {
@@ -1355,76 +1425,31 @@ export default function App() {
         </div>
 
         <nav className="flex-grow py-6 px-4 space-y-1">
-          <button 
-            onClick={() => {
-              setSelectedProjectId(null);
-              setMainView('DASHBOARD');
-              setProjectCategoryFilter(null);
-            }}
-            className={cn(
-              "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-              (!selectedProjectId && mainView === 'DASHBOARD') ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"
-            )}
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            Dashboard
-          </button>
-          <button 
-            onClick={() => {
-              setSelectedProjectId(null);
-              setMainView('PROJECTS');
-              setProjectCategoryFilter(null);
-            }}
-            className={cn(
-              "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-              (!selectedProjectId && mainView === 'PROJECTS') ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"
-            )}
-          >
-            <Briefcase className="w-4 h-4" />
-            All Projects
-          </button>
-          <button 
-            onClick={() => {
-              setSelectedProjectId(null);
-              setMainView('CALENDAR');
-              setProjectCategoryFilter(null);
-            }}
-            className={cn(
-              "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-              (!selectedProjectId && mainView === 'CALENDAR') ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"
-            )}
-          >
-            <Calendar className="w-4 h-4" />
-            Calendar
-          </button>
-          <button 
-            onClick={() => {
-              setSelectedProjectId(null);
-              setMainView('REPORTS');
-              setProjectCategoryFilter(null);
-            }}
-            className={cn(
-              "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-              (!selectedProjectId && mainView === 'REPORTS') ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"
-            )}
-          >
-            <BarChart3 className="w-4 h-4" />
-            Reports
-          </button>
-          <button 
-            onClick={() => {
-              setSelectedProjectId(null);
-              setMainView('RESOURCES');
-              setProjectCategoryFilter(null);
-            }}
-            className={cn(
-              "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-              (!selectedProjectId && mainView === 'RESOURCES') ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"
-            )}
-          >
-            <Users className="w-4 h-4" />
-            Resources
-          </button>
+          {[
+            { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard },
+            { id: 'PROJECTS', label: 'Projects', icon: Briefcase },
+            { id: 'CALENDAR', label: 'Calendar', icon: Calendar },
+            { id: 'VIEW_360', label: '360 View', icon: Eye },
+            { id: 'RESOURCES', label: 'Resources', icon: Users },
+            { id: 'REPORTS', label: 'Reports', icon: BarChart3 },
+            ...(userProfile?.role === 'ADMIN' ? [{ id: 'ROLES', label: 'Role Register', icon: Shield }] : [])
+          ].map((item) => (
+            <button 
+              key={item.id}
+              onClick={() => {
+                setSelectedProjectId(null);
+                setMainView(item.id as any);
+                setProjectCategoryFilter(null);
+              }}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                (!selectedProjectId && mainView === item.id) ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"
+              )}
+            >
+              <item.icon className="w-4 h-4" />
+              {item.label}
+            </button>
+          ))}
         </nav>
 
         <div className="p-4 border-t border-slate-800">
@@ -1471,6 +1496,8 @@ export default function App() {
                 {mainView === 'CALENDAR' && 'Project Calendar'}
                 {mainView === 'REPORTS' && 'Project Reports'}
                 {mainView === 'RESOURCES' && 'Resource Management'}
+                {mainView === 'ROLES' && 'Role Register'}
+                {mainView === 'VIEW_360' && '360° Perspective'}
               </h1>
             )}
             <p className="text-sm text-slate-500">
@@ -1481,6 +1508,8 @@ export default function App() {
                   {mainView === 'CALENDAR' && 'Visual timeline of tasks and milestones across all projects.'}
                   {mainView === 'REPORTS' && 'Detailed analytics and performance metrics.'}
                   {mainView === 'RESOURCES' && 'Team allocation and workload management.'}
+                  {mainView === 'ROLES' && 'Manage system roles and access permissions.'}
+                  {mainView === 'VIEW_360' && 'Holistic view of Products (R&D) and Client Delivery execution.'}
                 </>
               )}
             </p>
@@ -1962,6 +1991,14 @@ export default function App() {
                   )}
                 </div>
               )}
+
+              {mainView === 'ROLES' && userProfile && (
+                <RoleRegister currentUser={userProfile} projects={projects} />
+              )}
+
+              {mainView === 'VIEW_360' && (
+                <View360 projects={projects} />
+              )}
             </motion.div>
           ) : (
             <motion.div 
@@ -2005,59 +2042,92 @@ export default function App() {
               <div className="flex flex-col gap-2">
                 {/* Row 1 */}
                 <div className="bg-white border border-slate-200 rounded-xl p-1 flex items-center gap-1 w-fit overflow-x-auto max-w-full">
-                  {[
-                    { id: 'OVERVIEW', label: 'Overview', icon: LayoutDashboard },
-                    { id: 'CHARTER', label: 'Project Charter', icon: FileText },
-                    ...(selectedProject?.type === 'RD' ? [
-                      { id: 'BACKLOG', label: 'Backlog', icon: Layers },
-                      { id: 'TASKS', label: 'Scrum Board', icon: Layers },
-                      { id: 'RETRO', label: 'Retro', icon: History },
-                    ] : [
-                      { id: 'LIBRARY', label: 'Library Data', icon: BookOpen },
-                      { id: 'ROADMAP', label: 'Roadmap', icon: Calendar },
-                      { id: 'WBS', label: 'WBS', icon: Layers },
-                    ]),
-                  ].map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveTab(tab.id as any)}
-                      className={cn(
-                        "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap",
-                        activeTab === tab.id ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "text-slate-500 hover:bg-slate-50"
-                      )}
-                    >
-                      <tab.icon className="w-4 h-4" />
-                      {tab.label}
-                    </button>
-                  ))}
+                  {(() => {
+                    const role = userProfile?.role;
+                    const isStakeholder = role === 'STAKEHOLDER';
+                    const isOwner = role === 'OWNER';
+                    const isAdminOrPM = role === 'ADMIN' || role === 'PM';
+                    const isDev = role === 'DEVELOPER';
+
+                    const tabs = [{ id: 'OVERVIEW', label: 'Overview', icon: LayoutDashboard }];
+                    
+                    if (!isStakeholder) {
+                      if (isAdminOrPM || isDev) {
+                        tabs.push({ id: 'CHARTER', label: 'Project Charter', icon: FileText });
+                        if (selectedProject?.type === 'RD') {
+                          tabs.push({ id: 'BACKLOG', label: 'Backlog', icon: Layers });
+                          tabs.push({ id: 'TASKS', label: 'Scrum Board', icon: Layers });
+                          tabs.push({ id: 'RETRO', label: 'Retro', icon: History });
+                        } else {
+                          tabs.push({ id: 'LIBRARY', label: 'Library Data', icon: BookOpen });
+                          tabs.push({ id: 'ROADMAP', label: 'Roadmap', icon: Calendar });
+                          tabs.push({ id: 'WBS', label: 'WBS', icon: Layers });
+                        }
+                      } else if (isOwner) {
+                        if (selectedProject?.type === 'DELIVERY') {
+                          tabs.push({ id: 'LIBRARY', label: 'Library Data', icon: BookOpen });
+                        } else {
+                          tabs.push({ id: 'DATA_STORY', label: 'Data Story', icon: FileText });
+                        }
+                      }
+                    }
+
+                    return tabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id as any)}
+                        className={cn(
+                          "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap",
+                          activeTab === tab.id ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "text-slate-500 hover:bg-slate-50"
+                        )}
+                      >
+                        <tab.icon className="w-4 h-4" />
+                        {tab.label}
+                      </button>
+                    ));
+                  })()}
                 </div>
 
                 {/* Row 2 */}
                 <div className="bg-white border border-slate-200 rounded-xl p-1 flex items-center gap-1 w-fit overflow-x-auto max-w-full">
-                  {[
-                    { id: 'RAID', label: 'RAID Log', icon: ShieldAlert },
-                    ...(selectedProject?.type === 'DELIVERY' ? [
-                      { id: 'ISSUE_TRACKER', label: 'Issue tracker', icon: AlertCircle },
-                      { id: 'CHANGES', label: 'Change Register', icon: RefreshCw },
-                      { id: 'ACTIVITY', label: 'Action Point', icon: CheckCircle2 },
-                    ] : []),
-                    ...(selectedProject?.type === 'RD' ? [
-                      { id: 'ROADMAP', label: 'Roadmap', icon: Calendar },
-                      { id: 'DATA_STORY', label: 'Data Story', icon: FileText }
-                    ] : []),
-                  ].map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveTab(tab.id as any)}
-                      className={cn(
-                        "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap",
-                        activeTab === tab.id ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "text-slate-500 hover:bg-slate-50"
-                      )}
-                    >
-                      <tab.icon className="w-4 h-4" />
-                      {tab.label}
-                    </button>
-                  ))}
+                  {(() => {
+                    const role = userProfile?.role;
+                    const isAdminOrPM = role === 'ADMIN' || role === 'PM';
+                    const isDev = role === 'DEVELOPER';
+                    const isOwner = role === 'OWNER';
+
+                    const tabs = [];
+                    if (!isOwner && role !== 'STAKEHOLDER') {
+                      tabs.push({ id: 'RAID', label: 'RAID Log', icon: ShieldAlert });
+                      if (selectedProject?.type === 'DELIVERY') {
+                        tabs.push({ id: 'ISSUE_TRACKER', label: 'Issue tracker', icon: AlertCircle });
+                        tabs.push({ id: 'CHANGES', label: 'Change Register', icon: RefreshCw });
+                        tabs.push({ id: 'ACTIVITY', label: 'Action Point', icon: CheckCircle2 });
+                      }
+                      if (selectedProject?.type === 'RD') {
+                        tabs.push({ id: 'ROADMAP', label: 'Roadmap', icon: Calendar });
+                        tabs.push({ id: 'DATA_STORY', label: 'Data Story', icon: FileText });
+                      }
+                    }
+                    
+                    if (isAdminOrPM || (isDev && selectedProject?.ownerId === user?.uid)) {
+                      tabs.push({ id: 'MEMBERS', label: 'Project Access', icon: Users });
+                    }
+
+                    return tabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id as any)}
+                        className={cn(
+                          "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap",
+                          activeTab === tab.id ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "text-slate-500 hover:bg-slate-50"
+                        )}
+                      >
+                        <tab.icon className="w-4 h-4" />
+                        {tab.label}
+                      </button>
+                    ));
+                  })()}
                 </div>
               </div>
 
@@ -2068,6 +2138,13 @@ export default function App() {
                     project={selectedProject} 
                     onUpdate={handleUpdateProjectDetails}
                     isSaving={isSaving}
+                  />
+                )}
+
+                {activeTab === 'MEMBERS' && selectedProject && userProfile && (
+                  <ProjectMembers 
+                    project={selectedProject}
+                    currentUser={userProfile}
                   />
                 )}
 

@@ -5,11 +5,13 @@ let ai: GoogleGenAI | null = null;
 
 function getGenAI() {
   if (!ai) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
-      console.error("Gemini API Key is missing or invalid. Please check your environment variables.");
-      throw new Error("Gemini API Key is not configured correctly. Please set it in the project settings.");
+    const apiKey = process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY;
+    
+    if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey === "undefined" || apiKey === "" || apiKey === "null") {
+      console.error("Gemini API Key is missing or invalid. Current value:", apiKey);
+      throw new Error("Action Required: Please add your Gemini API Key in the 'Settings' -> 'Secrets' menu in Google AI Studio. This is required for AI file processing.");
     }
+    
     ai = new GoogleGenAI({ apiKey });
   }
   return ai;
